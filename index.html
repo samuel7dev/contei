@@ -1,0 +1,565 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1b2a4a">
+<title>Gastos</title>
+<style>
+:root{
+  --bg:#0f1830; --card:#18233f; --ink:#eef1f8; --muted:#9aa7c4; --line:#2a3858;
+  --accent:#f2b632; --accent-ink:#1b2a4a; --danger:#ff8a80; --ok:#6fd3a0; --pri:var(--ink); --on-pri:var(--bg);
+  box-sizing:border-box;
+  padding-top:env(safe-area-inset-top,0px); padding-bottom:env(safe-area-inset-bottom,0px);
+}
+@media all{
+  :root[data-modo="claro"]{--bg:#eef1f6; --card:#ffffff; --ink:#1b2a4a; --muted:#5d6b86; --line:#d9dfeb; --danger:#b3261e; --ok:#1f7a4d;}
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--ink);font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;-webkit-text-size-adjust:100%}
+main{max-width:560px;margin:0 auto;padding:16px 16px 48px}
+h1{font-size:1.5rem;margin:8px 0 14px;font-weight:700}
+.num{font-variant-numeric:tabular-nums}
+
+/* resumo */
+.resumo{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:16px}
+.resumo div{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:10px 8px;text-align:center}
+.resumo small{display:block;color:var(--muted);font-size:.78rem;margin-bottom:4px}
+.resumo b{font-size:1rem}
+.resumo .mes{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.resumo .mes small{color:var(--accent-ink);opacity:.8}
+
+/* entrada */
+.entrada{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px;margin-bottom:16px}
+textarea{width:100%;min-height:84px;resize:vertical;border:0;outline:0;background:transparent;color:var(--ink);font:inherit;font-size:1.05rem;line-height:1.7;
+  background-image:none}
+textarea::placeholder{color:var(--muted)}
+.linha{display:flex;gap:8px;align-items:center;margin-top:8px}
+button{font:inherit;cursor:pointer;border-radius:10px;border:1px solid var(--line);background:var(--card);color:var(--ink);padding:10px 14px;min-height:44px}
+button:focus-visible,input:focus-visible,textarea:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.salvar{flex:1;background:var(--pri);color:var(--on-pri);border-color:var(--pri);font-weight:700}
+.aviso{margin:8px 0 0;font-size:.9rem;min-height:1.2em}
+.aviso.ok{color:var(--ok)} .aviso.erro{color:var(--danger)}
+
+/* filtros */
+.filtros{display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap}
+.filtros button{padding:8px 12px;min-height:40px;border-radius:999px}
+.filtros button[aria-pressed="true"]{background:var(--pri);color:var(--on-pri);border-color:var(--pri)}
+input[type=search]{width:100%;font:inherit;padding:11px 12px;border-radius:10px;border:1px solid var(--line);background:var(--card);color:var(--ink);margin-bottom:12px}
+.total{display:flex;justify-content:space-between;align-items:baseline;margin:6px 2px 10px}
+.total span{color:var(--muted)} .total b{font-size:1.35rem}
+
+.cats{display:flex;gap:6px;overflow-x:auto;padding-bottom:6px;margin-bottom:6px;-webkit-overflow-scrolling:touch}
+.cats button{flex:0 0 auto;display:flex;flex-direction:column;align-items:flex-start;gap:2px;padding:8px 12px;min-height:48px;border-radius:12px;font-size:.9rem}
+.cats button span{color:var(--muted);font-size:.78rem}
+.cats button[aria-pressed="true"]{background:var(--pri);color:var(--on-pri);border-color:var(--pri)}
+.cats button[aria-pressed="true"] span{color:var(--on-pri);opacity:.8}
+li select{margin-top:4px;font:inherit;font-size:.8rem;padding:4px 6px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--ink);min-height:32px;max-width:100%}
+
+.topo{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.paleta{position:fixed;top:calc(8px + env(safe-area-inset-top,0px));right:8px;z-index:20;width:48px;height:48px;padding:0;border-radius:50%;font-size:1.5rem;line-height:1;display:flex;align-items:center;justify-content:center}
+li button.perigo{background:#c62828;border-color:#c62828;color:#fff;font-weight:700}
+.painel{position:fixed;top:calc(64px + env(safe-area-inset-top,0px));right:8px;left:8px;max-width:420px;margin-left:auto;max-height:calc(100% - 80px - env(safe-area-inset-top,0px) - env(safe-area-inset-bottom,0px));overflow-y:auto;z-index:30;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;box-shadow:0 8px 28px rgba(0,0,0,.35)}
+.painel h2{font-size:1rem;margin:0 0 8px}
+.linha-tema{display:flex;align-items:center;gap:8px;width:100%;margin-bottom:8px;min-height:48px;text-align:left}
+.linha-tema .valor{margin-left:auto;color:var(--muted);font-size:.9rem}
+#subtema{margin-bottom:10px}
+.predef{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px}
+.predef button{display:flex;align-items:center;gap:8px;padding:6px 12px;min-height:40px;border-radius:999px}
+.predef button[aria-pressed="true"]{border-color:var(--pri);box-shadow:0 0 0 2px var(--pri)}
+.amostra{display:inline-flex}
+.amostra i{width:14px;height:14px;border-radius:50%;display:inline-block;margin-right:-4px;border:1px solid var(--line)}
+.cores{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:8px}
+.cores label{display:flex;flex-direction:column;gap:4px;font-size:.85rem;color:var(--muted)}
+.cores input[type=color]{width:100%;height:44px;padding:2px;border:1px solid var(--line);border-radius:10px;background:var(--card)}
+.dica{margin:0 0 12px;font-size:.8rem;color:var(--muted)}
+.opcao{display:flex;align-items:center;gap:10px;min-height:44px}
+.opcao input{width:20px;height:20px}
+
+/* lista */
+ul{list-style:none;margin:0;padding:0}
+li{display:flex;align-items:center;gap:10px;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:10px 12px;margin-bottom:8px}
+li .desc{flex:1;min-width:0;overflow-wrap:anywhere}
+li .desc small{display:block;color:var(--muted);font-size:.78rem}
+li .val{font-weight:700;white-space:nowrap}
+li button{padding:6px 10px;min-height:36px;color:var(--muted)}
+.vazio{color:var(--muted);text-align:center;padding:24px 8px}
+.toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(16px + env(safe-area-inset-bottom,0px));background:var(--ink);color:var(--bg);padding:10px 14px;border-radius:10px;display:none;gap:12px;align-items:center;max-width:92vw}
+.toast.on{display:flex}
+.toast button{min-height:32px;padding:4px 10px;background:var(--accent);color:var(--accent-ink);border-color:var(--accent);font-weight:700}
+</style>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" type="image/png" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+</head>
+<body>
+<main>
+  <div class="topo">
+    <h1>Gastos</h1>
+    <button id="btnTema" class="paleta" aria-label="Configurações" aria-expanded="false" aria-controls="painel">⚙️</button>
+  </div>
+
+  <section class="painel" id="painel" hidden>
+    <h2>Configurações</h2>
+    <button class="linha-tema" id="btnSubTema" aria-expanded="false" aria-controls="subtema"><span>Tema</span><span class="valor" id="temaAtual"></span><span aria-hidden="true">›</span></button>
+    <div id="subtema" hidden>
+    <div class="predef" id="modos"></div>
+    <div id="personalizado" hidden>
+    <div class="predef" id="predef"></div>
+    <div class="cores">
+      <label>Primária<input type="color" id="corPri"></label>
+      <label>Secundária<input type="color" id="corSec"></label>
+      <label>Terciária<input type="color" id="corTer"></label>
+    </div>
+    <p class="dica">Primária: botões e seleções. Secundária: destaques. Terciária: fundo.</p>
+    </div>
+    </div>
+    <label class="opcao"><input type="checkbox" id="optCorrigir"> Corrigir palavras (acentos e maiúsculas)</label>
+  </section>
+
+  <section class="resumo" aria-label="Resumo">
+    <div><small>Hoje</small><b class="num" id="rHoje">R$ 0,00</b></div>
+    <div><small>7 dias</small><b class="num" id="rSemana">R$ 0,00</b></div>
+    <div class="mes"><small>Este mês</small><b class="num" id="rMes">R$ 0,00</b></div>
+  </section>
+
+  <section class="entrada">
+    <textarea id="texto" placeholder="Escreva seus gastos, separados por vírgula. Ex: 150 reais gasolina, 3 reais pão, 5 chiclete" aria-label="Gastos" enterkeyhint="send"></textarea>
+    <div class="linha"><button class="salvar" id="salvar">Salvar gastos</button></div>
+    <p class="aviso" id="aviso" role="status"></p>
+  </section>
+
+  <div class="filtros" id="filtros">
+    <button data-p="hoje" aria-pressed="false">Hoje</button>
+    <button data-p="semana" aria-pressed="false">7 dias</button>
+    <button data-p="mes" aria-pressed="true">Este mês</button>
+    <button data-p="tudo" aria-pressed="false">Tudo</button>
+  </div>
+  <input type="search" id="busca" placeholder="Buscar por palavra (ex: gasolina)" aria-label="Buscar por palavra">
+  <div class="cats" id="cats" aria-label="Categorias"></div>
+
+  <div class="total"><span id="totalRot">Total</span><b class="num" id="total">R$ 0,00</b></div>
+  <ul id="lista"></ul>
+</main>
+
+<div class="toast" id="toast"><span id="toastMsg"></span><button id="desfazer">Desfazer</button></div>
+
+<script>
+(function(){
+  var CHAVE = "gastos_v1";
+  var gastos = [];
+  var periodo = "mes";
+  var apagado = null, toastTimer = null;
+  var catFiltro = "";
+
+  // ordem importa: a primeira categoria que combinar vence
+  var CATEGORIAS = [
+    {nome:"Mercado", p:["mercado","supermercado","atacadao","atacarejo","feira","hortifruti","acougue","arroz","feijao","macarrao","carne","frango","leite","ovo","fruta","verdura","legume","sabao","detergente","amaciante","papel higienico","shampoo","desodorante"]},
+    {nome:"Contas", p:["aluguel","luz","energia","internet","condominio","iptu","boleto","fatura","telefone","cartao","parcela","gas","conta de agua"]},
+    {nome:"Transporte", p:["gasolina","combustivel","etanol","alcool","diesel","uber","99","onibus","passagem","metro","estacionamento","pedagio","oleo","mecanico","pneu","moto","taxi","lavagem"]},
+    {nome:"Saúde", p:["farmacia","remedio","medico","consulta","dentista","exame","vacina","hospital","dipirona"]},
+    {nome:"Lazer", p:["cinema","jogo","game","steam","netflix","spotify","show","bar","viagem","festa","ingresso","balada"]},
+    {nome:"Alimentação", p:["pao","paes","pao de queijo","salgado","chiclete","bala","lanche","cafe","refri","refrigerante","pizza","hamburguer","hamburger","almoco","janta","jantar","restaurante","doce","sorvete","agua","suco","ifood","padaria","comida","marmita","coxinha","pastel","bolo","chocolate","cerveja","biscoito","bolacha","salada","acai","esfiha","sanduiche","hot dog","batata"]}
+  ];
+  var OUTROS = "Outros";
+  var NOMES = CATEGORIAS.map(function(c){ return c.nome; }).concat([OUTROS]);
+  CATEGORIAS.forEach(function(c){ c.re = new RegExp("(^| )(" + c.p.join("|") + ")(s|es)?( |$)"); });
+
+  function categorizar(desc){
+    var t = semAcento(desc).replace(/[^a-z0-9]+/g," ").trim();
+    for(var i=0;i<CATEGORIAS.length;i++){ if(CATEGORIAS[i].re.test(t)) return CATEGORIAS[i].nome; }
+    return OUTROS;
+  }
+  function catDe(g){ return g.cat || categorizar(g.desc); }
+
+  function desenharCats(base){
+    var somas = {};
+    base.forEach(function(g){ var c = catDe(g); somas[c] = (somas[c]||0) + g.valor; });
+    var box = el("cats"); box.innerHTML = "";
+    function chip(nome, valor, ativo, c){
+      var b = document.createElement("button");
+      b.setAttribute("data-c", c);
+      b.setAttribute("aria-pressed", ativo ? "true" : "false");
+      var n = document.createElement("span"); n.textContent = nome;
+      var v = document.createElement("b"); v.className = "num"; v.textContent = brl(valor);
+      b.appendChild(n); b.appendChild(v); box.appendChild(b);
+    }
+    chip("Todas", soma(base), !catFiltro, "");
+    NOMES.forEach(function(n){ if(somas[n] || catFiltro === n) chip(n, somas[n]||0, catFiltro === n, n); });
+  }
+
+  function carregar(){
+    try { var s = localStorage.getItem(CHAVE); gastos = s ? JSON.parse(s) : []; }
+    catch(e){ gastos = []; }
+    if(!Array.isArray(gastos)) gastos = [];
+  }
+  function salvarTudo(){
+    try { localStorage.setItem(CHAVE, JSON.stringify(gastos)); return true; }
+    catch(e){ return false; }
+  }
+
+  function brl(n){ return n.toLocaleString("pt-BR",{style:"currency",currency:"BRL"}); }
+  function semAcento(s){ return s.normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase(); }
+
+  // converte "1.500,50", "12,5", "3.5" em número
+  function paraNumero(t){
+    if(/,/.test(t)){ t = t.replace(/\./g,"").replace(",","."); }
+    else if(/^\d{1,3}(\.\d{3})+$/.test(t)){ t = t.replace(/\./g,""); }
+    return parseFloat(t);
+  }
+
+  var NUM = /(\d{1,3}(?:\.\d{3})+(?:,\d{1,2})?|\d+(?:[.,]\d{1,2})?)/;
+  var MOEDA = /(r\$|reais|real|conto|contos)/gi;
+
+  function interpretar(texto){
+    var ok = [], falhas = [];
+    texto.split(/[,;\n]+/).forEach(function(pedaco){
+      var p = pedaco.trim();
+      if(!p) return;
+      var m = p.match(NUM);
+      if(!m){ falhas.push(p); return; }
+      var valor = paraNumero(m[1]);
+      if(!isFinite(valor) || valor <= 0){ falhas.push(p); return; }
+      var desc = p.replace(m[0], " ").replace(MOEDA, " ").replace(/\s+/g," ").trim();
+      desc = desc.replace(/^(de|com|em|no|na|pra|para)\s+/i,"");
+      if(!desc) desc = "sem descrição";
+      ok.push({valor:valor, desc:cfg.corrigir ? corrigirTexto(desc) : desc, cat:categorizar(desc)});
+    });
+    return {ok:ok, falhas:falhas};
+  }
+
+  function chaveDia(d){ return d.getFullYear()+"-"+(d.getMonth()+1)+"-"+d.getDate(); }
+  function inicioDoDia(d){ return new Date(d.getFullYear(), d.getMonth(), d.getDate()); }
+
+  function dentro(g, p){
+    var d = new Date(g.data), agora = new Date();
+    if(p === "tudo") return true;
+    if(p === "hoje") return chaveDia(d) === chaveDia(agora);
+    if(p === "semana"){
+      var ini = inicioDoDia(agora); ini.setDate(ini.getDate()-6);
+      return d >= ini;
+    }
+    if(p === "mes") return d.getFullYear()===agora.getFullYear() && d.getMonth()===agora.getMonth();
+    return true;
+  }
+  function soma(arr){ return arr.reduce(function(a,g){ return a+g.valor; },0); }
+
+  function dataBonita(iso){
+    var d = new Date(iso), h = new Date();
+    var hora = d.toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"});
+    if(chaveDia(d) === chaveDia(h)) return "hoje, "+hora;
+    return d.toLocaleDateString("pt-BR",{day:"2-digit",month:"2-digit"})+", "+hora;
+  }
+
+  function el(id){ return document.getElementById(id); }
+  var ROTULOS = {hoje:"Total de hoje", semana:"Total dos últimos 7 dias", mes:"Total deste mês", tudo:"Total geral"};
+
+  function desenhar(){
+    el("rHoje").textContent = brl(soma(gastos.filter(function(g){return dentro(g,"hoje");})));
+    el("rSemana").textContent = brl(soma(gastos.filter(function(g){return dentro(g,"semana");})));
+    el("rMes").textContent = brl(soma(gastos.filter(function(g){return dentro(g,"mes");})));
+
+    var termo = semAcento(el("busca").value.trim());
+    var base = gastos
+      .filter(function(g){ return dentro(g, periodo); })
+      .filter(function(g){ return !termo || semAcento(g.desc).indexOf(termo) !== -1; })
+      .sort(function(a,b){ return new Date(b.data) - new Date(a.data); });
+    desenharCats(base);
+    var lista = catFiltro ? base.filter(function(g){ return catDe(g) === catFiltro; }) : base;
+
+    el("totalRot").textContent = ROTULOS[periodo] + (catFiltro ? " em " + catFiltro : "") + (termo ? ' com "'+el("busca").value.trim()+'"' : "");
+    el("total").textContent = brl(soma(lista));
+
+    var ul = el("lista");
+    ul.innerHTML = "";
+    if(!lista.length){
+      var v = document.createElement("div");
+      v.className = "vazio";
+      v.textContent = gastos.length ? "Nenhum gasto encontrado nesse filtro." : "Nenhum gasto ainda. Escreva acima e toque em Salvar gastos.";
+      ul.appendChild(v);
+      return;
+    }
+    lista.forEach(function(g){
+      var li = document.createElement("li");
+      var d = document.createElement("div"); d.className = "desc";
+      d.textContent = g.desc;
+      var s = document.createElement("small"); s.textContent = dataBonita(g.data); d.appendChild(s);
+      var sel = document.createElement("select");
+      sel.setAttribute("aria-label","Categoria de "+g.desc);
+      NOMES.forEach(function(n){
+        var o = document.createElement("option"); o.value = n; o.textContent = n; sel.appendChild(o);
+      });
+      sel.value = catDe(g);
+      sel.addEventListener("change", function(){ g.cat = sel.value; salvarTudo(); desenhar(); });
+      d.appendChild(sel);
+      var val = document.createElement("span"); val.className = "val num"; val.textContent = brl(g.valor);
+      var b = document.createElement("button"); b.textContent = "Apagar"; b.setAttribute("aria-label","Apagar "+g.desc);
+      b.addEventListener("click", function(){
+        if(b.getAttribute("data-conf") === "1"){ apagar(g.id); return; }
+        b.setAttribute("data-conf", "1"); b.textContent = "Certeza?"; b.classList.add("perigo");
+        setTimeout(function(){
+          if(b.isConnected){ b.removeAttribute("data-conf"); b.textContent = "Apagar"; b.classList.remove("perigo"); }
+        }, 4000);
+      });
+      li.appendChild(d); li.appendChild(val); li.appendChild(b);
+      ul.appendChild(li);
+    });
+  }
+
+  function aviso(msg, tipo){
+    var a = el("aviso"); a.textContent = msg; a.className = "aviso " + (tipo||"");
+  }
+
+  function adicionar(){
+    var r = interpretar(el("texto").value);
+    if(!r.ok.length){
+      aviso(r.falhas.length ? 'Não achei valor em: "'+r.falhas.join('", "')+'". Escreva o número, ex: 5 chiclete.' : "Escreva pelo menos um gasto.", "erro");
+      return;
+    }
+    var agora = new Date().toISOString();
+    r.ok.forEach(function(x,i){
+      gastos.push({id: Date.now()+"-"+i, valor:x.valor, desc:x.desc, cat:x.cat, data:agora});
+    });
+    var gravou = salvarTudo();
+    var total = soma(r.ok);
+    var msg = r.ok.length+" gasto"+(r.ok.length>1?"s":"")+" salvo"+(r.ok.length>1?"s":"")+": "+brl(total)+".";
+    if(r.falhas.length) msg += ' Não entendi: "'+r.falhas.join('", "')+'".';
+    if(!gravou) msg += " Atenção: não consegui gravar no aparelho, os dados somem ao fechar.";
+    aviso(msg, (r.falhas.length || !gravou) ? "erro" : "ok");
+    el("texto").value = "";
+    desenhar();
+  }
+
+  function mostrarToast(msg){
+    el("toastMsg").textContent = msg;
+    el("toast").classList.add("on");
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function(){ el("toast").classList.remove("on"); apagado = null; }, 6000);
+  }
+  function apagar(id){
+    var i = gastos.findIndex(function(g){ return g.id === id; });
+    if(i < 0) return;
+    apagado = gastos.splice(i,1)[0];
+    salvarTudo(); desenhar();
+    mostrarToast("Gasto apagado.");
+  }
+  el("desfazer").addEventListener("click", function(){
+    if(apagado){ gastos.push(apagado); apagado = null; salvarTudo(); desenhar(); }
+    el("toast").classList.remove("on");
+  });
+
+  el("salvar").addEventListener("click", adicionar);
+  el("cats").addEventListener("click", function(e){
+    var b = e.target.closest("button"); if(!b) return;
+    catFiltro = b.getAttribute("data-c");
+    desenhar();
+  });
+  el("busca").addEventListener("input", desenhar);
+  el("filtros").addEventListener("click", function(e){
+    var b = e.target.closest("button"); if(!b) return;
+    periodo = b.getAttribute("data-p");
+    Array.prototype.forEach.call(el("filtros").children, function(x){
+      x.setAttribute("aria-pressed", x === b ? "true" : "false");
+    });
+    desenhar();
+  });
+
+  // ---------- configurações: correção de texto e tema ----------
+  var CFG_CHAVE = "gastos_cfg_v1";
+  var cfg = {corrigir:true, modo:"escuro", tema:null}; // tema null = padrão (segue claro/escuro do celular)
+  var HEX = /^#[0-9a-f]{6}$/i;
+
+  function carregarCfg(){
+    try{
+      var s = localStorage.getItem(CFG_CHAVE);
+      if(!s) return;
+      var c = JSON.parse(s);
+      if(!c || typeof c !== "object") return;
+      cfg.corrigir = c.corrigir !== false;
+      cfg.modo = (c.modo === "claro" || c.modo === "personalizado") ? c.modo : (c.tema ? "personalizado" : "escuro");
+      var t = c.tema;
+      cfg.tema = (t && HEX.test(t.pri) && HEX.test(t.sec) && HEX.test(t.ter)) ? {pri:t.pri, sec:t.sec, ter:t.ter} : null;
+    }catch(e){}
+  }
+  function salvarCfg(){ try{ localStorage.setItem(CFG_CHAVE, JSON.stringify(cfg)); }catch(e){} }
+
+  var DICIONARIO = {
+    pao:"pão",paes:"pães",acai:"açaí",agua:"água",cafe:"café",cha:"chá",feijao:"feijão",macarrao:"macarrão",
+    acougue:"açougue",atacadao:"atacadão",hortifruti:"hortifrúti",acucar:"açúcar",linguica:"linguiça",salmao:"salmão",
+    maca:"maçã",limao:"limão",mamao:"mamão",melao:"melão",pimentao:"pimentão",sabao:"sabão",carvao:"carvão",
+    almoco:"almoço",refeicao:"refeição",hamburguer:"hambúrguer",hamburger:"hambúrguer",sanduiche:"sanduíche",manha:"manhã",
+    saude:"saúde",farmacia:"farmácia",remedio:"remédio",medico:"médico",veterinario:"veterinário",racao:"ração",
+    onibus:"ônibus",metro:"metrô",taxi:"táxi",pedagio:"pedágio",oleo:"óleo",mecanico:"mecânico",pecas:"peças",revisao:"revisão",
+    gas:"gás",botijao:"botijão",alcool:"álcool",combustivel:"combustível",higienico:"higiênico",
+    cartao:"cartão",condominio:"condomínio",credito:"crédito",debito:"débito",emprestimo:"empréstimo",
+    inscricao:"inscrição",matricula:"matrícula",aniversario:"aniversário",serie:"série",musica:"música",lapis:"lápis",
+    tenis:"tênis",calca:"calça",sandalia:"sandália",oculos:"óculos",relogio:"relógio",bone:"boné",
+    voce:"você",nao:"não",mae:"mãe",
+    ifood:"iFood",uber:"Uber",netflix:"Netflix",spotify:"Spotify",steam:"Steam",pix:"Pix",amazon:"Amazon",shopee:"Shopee",
+    iptu:"IPTU",ipva:"IPVA"
+  };
+
+  function corrigirTexto(t){
+    var out = t.replace(/[\p{L}\p{N}]+/gu, function(w){
+      var k = semAcento(w);
+      if(Object.prototype.hasOwnProperty.call(DICIONARIO, k)) return DICIONARIO[k];
+      return (w.length > 1 && w === w.toUpperCase()) ? w.toLowerCase() : w;
+    });
+    out = out.replace(/\s+/g," ").trim();
+    if(out && !/^iFood/.test(out)) out = out.charAt(0).toUpperCase() + out.slice(1);
+    return out;
+  }
+
+  // ---------- tema ----------
+  function rgb(h){ return [parseInt(h.slice(1,3),16), parseInt(h.slice(3,5),16), parseInt(h.slice(5,7),16)]; }
+  function hex(a){ return "#" + a.map(function(v){ v = Math.max(0, Math.min(255, Math.round(v))); return (v<16 ? "0" : "") + v.toString(16); }).join(""); }
+  function mistura(a, b, t){ var x = rgb(a), y = rgb(b); return hex([x[0]+(y[0]-x[0])*t, x[1]+(y[1]-x[1])*t, x[2]+(y[2]-x[2])*t]); }
+  function lum(h){
+    var c = rgb(h).map(function(v){ v /= 255; return v <= 0.03928 ? v/12.92 : Math.pow((v+0.055)/1.055, 2.4); });
+    return 0.2126*c[0] + 0.7152*c[1] + 0.0722*c[2];
+  }
+  function textoSobre(h){ return lum(h) > 0.179 ? "#14213a" : "#ffffff"; }
+
+  var VARS = ["--bg","--card","--ink","--muted","--line","--pri","--on-pri","--accent","--accent-ink","--danger","--ok"];
+  function aplicarTema(){
+    var root = document.documentElement, r = root.style;
+    VARS.forEach(function(v){ r.removeProperty(v); });
+    var meta = document.querySelector('meta[name="theme-color"]');
+    var t = cfg.tema;
+    if(cfg.modo !== "personalizado"){
+      root.setAttribute("data-modo", cfg.modo === "claro" ? "claro" : "escuro");
+      if(meta) meta.setAttribute("content", cfg.modo === "claro" ? "#eef1f6" : "#0f1830");
+      return;
+    }
+    root.setAttribute("data-modo", "personalizado");
+    if(!t) t = {pri:"#0b5fa5", sec:"#37c6c0", ter:"#e8f3fb"};
+    var claro = lum(t.ter) > 0.179;
+    var ink = claro ? "#14213a" : "#eef1f8";
+    r.setProperty("--bg", t.ter);
+    r.setProperty("--card", claro ? mistura(t.ter, "#ffffff", 0.65) : mistura(t.ter, "#ffffff", 0.08));
+    r.setProperty("--ink", ink);
+    r.setProperty("--muted", mistura(ink, t.ter, 0.4));
+    r.setProperty("--line", mistura(t.ter, ink, 0.18));
+    r.setProperty("--pri", t.pri);
+    r.setProperty("--on-pri", textoSobre(t.pri));
+    r.setProperty("--accent", t.sec);
+    r.setProperty("--accent-ink", textoSobre(t.sec));
+    r.setProperty("--danger", claro ? "#b3261e" : "#ff8a80");
+    r.setProperty("--ok", claro ? "#1f7a4d" : "#6fd3a0");
+    if(meta) meta.setAttribute("content", t.pri);
+  }
+
+  var PREDEF = [
+    
+    {nome:"Oceano", tema:{pri:"#0b5fa5", sec:"#37c6c0", ter:"#e8f3fb"}},
+    {nome:"Floresta", tema:{pri:"#1f6b45", sec:"#e0a526", ter:"#eaf4ec"}},
+    {nome:"Pôr do sol", tema:{pri:"#b5391f", sec:"#f4a259", ter:"#fbefe6"}},
+    {nome:"Uva", tema:{pri:"#5b2a9b", sec:"#f06fa8", ter:"#f2ecfa"}},
+    {nome:"Noite", tema:{pri:"#7aa2ff", sec:"#ffcf5c", ter:"#10172b"}}
+  ];
+
+  function desenharPredef(){
+    var box = el("predef"); box.innerHTML = "";
+    PREDEF.forEach(function(p, i){
+      var b = document.createElement("button");
+      var ativo = p.tema ? (cfg.tema && cfg.tema.pri === p.tema.pri && cfg.tema.sec === p.tema.sec && cfg.tema.ter === p.tema.ter) : !cfg.tema;
+      b.setAttribute("aria-pressed", ativo ? "true" : "false");
+      b.setAttribute("data-i", i);
+      if(p.tema){
+        var a = document.createElement("span"); a.className = "amostra";
+        [p.tema.pri, p.tema.sec, p.tema.ter].forEach(function(c){
+          var d = document.createElement("i"); d.style.background = c; a.appendChild(d);
+        });
+        b.appendChild(a);
+      }
+      var n = document.createElement("span"); n.textContent = p.nome; b.appendChild(n);
+      box.appendChild(b);
+    });
+  }
+  function sincronizarCores(){
+    var t = cfg.tema || {pri:"#0b5fa5", sec:"#37c6c0", ter:"#e8f3fb"};
+    el("corPri").value = t.pri; el("corSec").value = t.sec; el("corTer").value = t.ter;
+  }
+
+  el("btnTema").addEventListener("click", function(){
+    var p = el("painel"), abrir = p.hidden;
+    p.hidden = !abrir;
+    el("btnTema").setAttribute("aria-expanded", abrir ? "true" : "false");
+  });
+  el("predef").addEventListener("click", function(e){
+    var b = e.target.closest("button"); if(!b) return;
+    var p = PREDEF[parseInt(b.getAttribute("data-i"), 10)];
+    cfg.tema = p.tema ? {pri:p.tema.pri, sec:p.tema.sec, ter:p.tema.ter} : null;
+    salvarCfg(); aplicarTema(); desenharPredef(); sincronizarCores();
+  });
+  ["corPri","corSec","corTer"].forEach(function(id){
+    el(id).addEventListener("input", function(){
+      cfg.tema = {pri:el("corPri").value, sec:el("corSec").value, ter:el("corTer").value};
+      salvarCfg(); aplicarTema(); desenharPredef();
+    });
+  });
+  function desenharModos(){
+    var box = el("modos"); box.innerHTML = "";
+    [["escuro","Padrão (escuro)"],["claro","Claro"],["personalizado","Personalizado"]].forEach(function(m){
+      var b = document.createElement("button");
+      b.setAttribute("data-m", m[0]);
+      b.setAttribute("aria-pressed", cfg.modo === m[0] ? "true" : "false");
+      b.textContent = m[1];
+      box.appendChild(b);
+    });
+    el("personalizado").hidden = cfg.modo !== "personalizado";
+    el("temaAtual").textContent = cfg.modo === "claro" ? "Claro" : (cfg.modo === "personalizado" ? "Personalizado" : "Padrão (escuro)");
+  }
+  el("modos").addEventListener("click", function(e){
+    var b = e.target.closest("button"); if(!b) return;
+    cfg.modo = b.getAttribute("data-m");
+    if(cfg.modo === "personalizado" && !cfg.tema) cfg.tema = {pri:"#0b5fa5", sec:"#37c6c0", ter:"#e8f3fb"};
+    salvarCfg(); aplicarTema(); desenharModos(); desenharPredef(); sincronizarCores();
+  });
+  // Enter do teclado salva direto (Shift+Enter não)
+  function enviarComEnter(e){
+    e.preventDefault();
+    if(el("texto").value.trim()) adicionar();
+  }
+  el("texto").addEventListener("keydown", function(e){
+    if(e.key === "Enter" && !e.shiftKey && !e.isComposing) enviarComEnter(e);
+  });
+  el("texto").addEventListener("beforeinput", function(e){
+    if(e.inputType === "insertLineBreak") enviarComEnter(e);
+  });
+  el("btnSubTema").addEventListener("click", function(){
+    var s = el("subtema"), abrir = s.hidden;
+    s.hidden = !abrir;
+    el("btnSubTema").setAttribute("aria-expanded", abrir ? "true" : "false");
+  });
+  function fecharConfig(){ el("painel").hidden = true; el("btnTema").setAttribute("aria-expanded", "false"); }
+  document.addEventListener("click", function(e){
+    var p = el("painel");
+    if(p.hidden) return;
+    var caminho = e.composedPath ? e.composedPath() : [];
+    if(caminho.indexOf(p) === -1 && caminho.indexOf(el("btnTema")) === -1) fecharConfig();
+  });
+  document.addEventListener("keydown", function(e){
+    if(e.key === "Escape" && !el("painel").hidden) fecharConfig();
+  });
+  el("optCorrigir").addEventListener("change", function(){
+    cfg.corrigir = el("optCorrigir").checked; salvarCfg();
+  });
+
+  carregar();
+  carregarCfg();
+  aplicarTema();
+  el("optCorrigir").checked = cfg.corrigir;
+  desenharModos();
+  desenharPredef();
+  sincronizarCores();
+  desenhar();
+})();
+</script>
+<script>
+if("serviceWorker" in navigator){
+  window.addEventListener("load", function(){ navigator.serviceWorker.register("sw.js").catch(function(){}); });
+}
+</script>
+</body>
+</html>

@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#1b2a4a">
+<meta name="theme-color" content="#0f1830">
 <title>Contei</title>
 <link rel="stylesheet" href="estilo.css">
 <link rel="manifest" href="manifest.json">
@@ -35,7 +35,7 @@
     </section>
 
     <section class="entrada">
-    <textarea id="texto" placeholder="Escreva seus gastos da forma que preferir, separados por vírgula. Ex: R$150 gasolina, 3 reais pão, 50 mercado" aria-label="Gastos" enterkeyhint="send"></textarea>
+    <textarea id="texto" placeholder="Escreva seus gastos separados por vírgula. Ex: R$150 gasolina, 3 reais pão, ontem 50 mercado, dia 12 20 pizza, +3000 salário" aria-label="Gastos" enterkeyhint="send"></textarea>
     <div class="linha"><button class="salvar" id="salvar">Salvar gastos</button></div>
     <p class="aviso" id="aviso" role="status"></p>
   </section>
@@ -50,6 +50,7 @@
   <div class="cats" id="cats" aria-label="Categorias"></div>
 
   <div class="total"><span id="totalRot">Total</span><b class="num" id="total">R$ 0,00</b></div>
+  <div class="resumo-rapido" id="resumoRapido" aria-live="polite"></div>
   <ul id="lista"></ul>
   </div>
 
@@ -75,6 +76,16 @@
     <section class="bloco">
       <h2>Este mês por categoria</h2>
       <div class="barras" id="barras"></div>
+    </section>
+
+    <section class="bloco" id="blocoMetasCat" hidden>
+      <h2>Metas por categoria</h2>
+      <div class="barras" id="barrasMetas"></div>
+    </section>
+
+    <section class="bloco">
+      <h2 id="tituloGrafico">Gasto por dia do mês</h2>
+      <canvas id="graficoLinha" aria-label="Gráfico dos seus gastos" role="img"></canvas>
     </section>
 
     <section class="bloco">
@@ -111,6 +122,27 @@
       <label class="campo" for="diaMes">O mês começa no dia</label>
       <select id="diaMes"></select>
       <p class="dica">Vale pro "Este mês", pra meta e pro perfil. Útil se o seu dinheiro entra no meio do mês.</p>
+      <h2 class="sub">Meta por categoria</h2>
+      <div id="listaMetasCat"></div>
+      <div class="linha-campo">
+        <select id="metaCatSel" aria-label="Categoria"></select>
+        <input type="text" id="metaCatVal" inputmode="decimal" placeholder="R$ por mês" autocomplete="off" style="max-width:110px">
+        <button id="btnMetaCat">Salvar</button>
+      </div>
+      <p class="dica">Deixe o valor vazio e toque em Salvar pra remover a meta daquela categoria.</p>
+    </section>
+
+    <section class="bloco">
+      <h2>Gastos fixos</h2>
+      <p class="dica">Lançam sozinhos todo mês, no dia escolhido (aluguel, internet, assinaturas).</p>
+      <div id="listaFixos"></div>
+      <div class="linha-campo">
+        <input type="text" id="fixoDesc" maxlength="40" placeholder="Descrição (ex: Aluguel)" autocomplete="off">
+        <input type="text" id="fixoValor" inputmode="decimal" placeholder="Valor" autocomplete="off" style="max-width:100px">
+      </div>
+      <label class="campo" for="fixoDia">Todo dia</label>
+      <select id="fixoDia"></select>
+      <button class="largo" id="btnAddFixo">Adicionar gasto fixo</button>
     </section>
 
     <section class="bloco">
@@ -140,10 +172,11 @@
       <p id="ultimoBackup"></p>
       <div class="botoes">
         <button id="btnExportar">Exportar backup</button>
+        <button id="btnExportarCSV">Exportar CSV</button>
         <button id="btnImportar">Importar backup</button>
       </div>
       <input type="file" id="arqImportar" accept="application/json,.json" hidden>
-      <button class="largo" id="btnApagarTudo">Apagar todos os gastos</button>
+      <button class="largo" id="btnApagarTudo">Apagar todos os lançamentos</button>
     </section>
   </div>
 </main>
@@ -155,6 +188,7 @@
 </nav>
 
 <div class="toast" id="toast"><span id="toastMsg"></span><button id="desfazer">Desfazer</button></div>
+<div class="toast toast-aprender" id="toastAprender"><span id="toastAprenderMsg"></span><button id="aprenderSim">Sempre</button></div>
 
 <script src="app.js"></script>
 </body>

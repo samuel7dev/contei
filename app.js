@@ -1,7 +1,7 @@
 
 (function(){
-  var CHAVE = "gastos_v1";
-  var gastos = [];
+  var CHAVE = "gastos_v1", CHAVE_ENT = "entradas_v1";
+  var gastos = [], entradas = [];
   var periodo = "mes";
   var apagado = null, toastTimer = null;
   var catFiltro = "";
@@ -43,16 +43,29 @@
       b.appendChild(n); b.appendChild(v); box.appendChild(b);
     }
     chip("Todas", soma(base), !catFiltro, "");
-    nomesCats().forEach(function(n){ if(somas[n] || catFiltro === n) chip(n, somas[n]||0, catFiltro === n, n); });
+    // Ordenar por soma decrescente, categorias com 0 no final
+    var ordenadas = nomesCats().slice().sort(function(a, b){
+      var sa = somas[a] || 0, sb = somas[b] || 0;
+      if(sa !== sb) return sb - sa;
+      return a.localeCompare(b);
+    });
+    ordenadas.forEach(function(n){ if(somas[n] || catFiltro === n) chip(n, somas[n]||0, catFiltro === n, n); });
   }
 
   function carregar(){
     try { var s = localStorage.getItem(CHAVE); gastos = s ? JSON.parse(s) : []; }
     catch(e){ gastos = []; }
     if(!Array.isArray(gastos)) gastos = [];
+    try { var s2 = localStorage.getItem(CHAVE_ENT); entradas = s2 ? JSON.parse(s2) : []; }
+    catch(e){ entradas = []; }
+    if(!Array.isArray(entradas)) entradas = [];
   }
   function salvarTudo(){
-    try { localStorage.setItem(CHAVE, JSON.stringify(gastos)); return true; }
+    try {
+      localStorage.setItem(CHAVE, JSON.stringify(gastos));
+      localStorage.setItem(CHAVE_ENT, JSON.stringify(entradas));
+      return true;
+    }
     catch(e){ return false; }
   }
 
@@ -69,19 +82,51 @@
   var NUM = /(\d{1,3}(?:\.\d{3})+(?:,\d{1,2})?|\d+(?:[.,]\d{1,2})?)/;
   var MOEDA = /(r\$|reais|real|conto|contos)/gi;
 
+  var RE_ENTRADA = /^\s*\+|\b(recebi|ganhei|salario|receita|freela|freelance)\b/;
+
+  function diaClamp(ano, mes, dia){
+    var ult = new Date(ano, mes + 1, 0).getDate();
+    return new Date(ano, mes, Math.min(dia, ult));
+  }
+  // acha uma data escrita no texto: ontem, anteontem, hoje, dia 12, 12/10, 12/10/2025
+  function lerData(p){
+    var hoje = inicioDoDia(new Date()), d = null, m;
+    if((m = p.match(/\b(anteontem|ontem|hoje)\b/i))){
+      var k = m[1].toLowerCase();
+      d = new Date(hoje.getFullYear(), hoje.getMonth(), hoje.getDate() - (k === "ontem" ? 1 : k === "anteontem" ? 2 : 0));
+      p = p.replace(m[0], " ");
+    } else if((m = p.match(/\b(\d{1,2})\/(\d{1,2})(?:\/(\d{4}|\d{2}))?\b/))){
+      var dia = +m[1], mes = +m[2] - 1, ano = m[3] ? +m[3] : hoje.getFullYear();
+      if(ano < 100) ano += 2000;
+      var t = new Date(ano, mes, dia);
+      if(t.getMonth() === mes && t.getDate() === dia){
+        if(!m[3] && t > hoje) t = new Date(ano - 1, mes, dia);
+        if(t <= hoje){ d = t; p = p.replace(m[0], " "); }
+      }
+    } else if((m = p.match(/\bdia\s+(\d{1,2})\b/i)) && +m[1] >= 1 && +m[1] <= 31){
+      var t2 = diaClamp(hoje.getFullYear(), hoje.getMonth(), +m[1]);
+      if(t2 > hoje) t2 = diaClamp(hoje.getFullYear(), hoje.getMonth() - 1, +m[1]);
+      d = t2; p = p.replace(m[0], " ");
+    }
+    return {data:d, resto:p};
+  }
+
   function interpretar(texto){
     var ok = [], falhas = [];
     texto.split(/[,;\n]+/).forEach(function(pedaco){
       var p = pedaco.trim();
       if(!p) return;
+      var ent = RE_ENTRADA.test(semAcento(p));
+      var ld = lerData(p); p = ld.resto;
+      if(ent) p = p.replace(/\+/g, " ").replace(/\b(recebi|ganhei)\b/gi, " ");
       var m = p.match(NUM);
-      if(!m){ falhas.push(p); return; }
+      if(!m){ falhas.push(pedaco.trim()); return; }
       var valor = paraNumero(m[1]);
-      if(!isFinite(valor) || valor <= 0){ falhas.push(p); return; }
+      if(!isFinite(valor) || valor <= 0){ falhas.push(pedaco.trim()); return; }
       var desc = p.replace(m[0], " ").replace(MOEDA, " ").replace(/\s+/g," ").trim();
       desc = desc.replace(/^(de|com|em|no|na|pra|para)\s+/i,"");
-      if(!desc) desc = "sem descrição";
-      ok.push({valor:valor, desc:cfg.corrigir ? corrigirTexto(desc) : desc, cat:categorizar(desc)});
+      if(!desc) desc = ent ? "entrada" : "sem descrição";
+      ok.push({valor:valor, desc:cfg.corrigir ? corrigirTexto(desc) : desc, cat:ent ? undefined : categorizar(desc), ent:ent, data:ld.data});
     });
     return {ok:ok, falhas:falhas};
   }
@@ -108,8 +153,14 @@
   }
   function soma(arr){ return arr.reduce(function(a,g){ return a+g.valor; },0); }
 
-  function dataBonita(iso){
-    var d = new Date(iso), h = new Date();
+  function dataBonita(g){
+    var d = new Date(g.data), h = new Date();
+    if(g.semHora){
+      var ontem = new Date(h.getFullYear(), h.getMonth(), h.getDate() - 1);
+      if(chaveDia(d) === chaveDia(h)) return "hoje";
+      if(chaveDia(d) === chaveDia(ontem)) return "ontem";
+      return d.toLocaleDateString("pt-BR", d.getFullYear() === h.getFullYear() ? {day:"2-digit",month:"2-digit"} : {day:"2-digit",month:"2-digit",year:"numeric"});
+    }
     var hora = d.toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"});
     if(chaveDia(d) === chaveDia(h)) return "hoje, "+hora;
     return d.toLocaleDateString("pt-BR",{day:"2-digit",month:"2-digit"})+", "+hora;
@@ -119,36 +170,74 @@
   var ROTULOS = {hoje:"Total de hoje", semana:"Total dos últimos 7 dias", mes:"Total deste mês", tudo:"Total geral"};
 
   function naTelaInicio(){ return el("tela-inicio").classList.contains("ativa"); }
+  // Helper: parse filtro de valor (valor:50, valor:>100, valor:<200, valor:50-200)
+  function parseValorFiltro(termo){
+    var m = termo.match(/^valor\s*:\s*([<>]?\s*\d+(?:[.,]\d+)?)\s*(?:-\s*(\d+(?:[.,]\d+)?))?$/i);
+    if(!m) return null;
+    var op = "", v1 = m[1].trim(), v2 = m[2];
+    var matchOp = v1.match(/^([<>])\s*(.+)$/);
+    if(matchOp){ op = matchOp[1]; v1 = matchOp[2]; }
+    var min = v2 ? paraNumero(v1.replace(",", ".")) : (op === ">" ? paraNumero(v1.replace(",", ".")) + 0.001 : 0);
+    var max = v2 ? paraNumero(v2.replace(",", ".")) : (op === "<" ? paraNumero(v1.replace(",", ".")) - 0.001 : (op === ">" ? Infinity : paraNumero(v1.replace(",", "."))));
+    return {min: min, max: max};
+  }
+
+  function somasPorCat(){
+    var somas = {};
+    gastos.forEach(function(g){ if(dentro(g, "mes")){ var c = catDe(g); somas[c] = (somas[c] || 0) + g.valor; } });
+    return somas;
+  }
+
   function desenhar(){
     if(!naTelaInicio()) return;
     animarValor(el("rHoje"), soma(gastos.filter(function(g){return dentro(g,"hoje");})));
     animarValor(el("rSemana"), soma(gastos.filter(function(g){return dentro(g,"semana");})));
     animarValor(el("rMes"), soma(gastos.filter(function(g){return dentro(g,"mes");})));
-    renderMeta(); renderLembrete();
+    renderMeta(); renderLembrete(); renderResumoRapido();
 
-    var termo = semAcento(el("busca").value.trim());
-    var base = gastos
-      .filter(function(g){ return dentro(g, periodo); })
-      .filter(function(g){ return !termo || semAcento(g.desc).indexOf(termo) !== -1; })
-      .sort(function(a,b){ return new Date(b.data) - new Date(a.data); });
+    var buscaInput = el("busca").value.trim();
+    var termo = semAcento(buscaInput);
+    var valorFiltro = parseValorFiltro(termo);
+    var termoTexto = valorFiltro ? "" : termo; // se tem filtro de valor, não filtra por texto
+    function passa(g){
+      if(valorFiltro) return g.valor >= valorFiltro.min && g.valor <= valorFiltro.max;
+      return !termoTexto || semAcento(g.desc).indexOf(termoTexto) !== -1;
+    }
+    var base = gastos.filter(function(g){ return dentro(g, periodo); }).filter(passa);
     desenharCats(base);
     var lista = catFiltro ? base.filter(function(g){ return catDe(g) === catFiltro; }) : base;
+    var baseEnt = catFiltro ? [] : entradas.filter(function(g){ return dentro(g, periodo); }).filter(passa);
 
-    el("totalRot").textContent = ROTULOS[periodo] + (catFiltro ? " em " + catFiltro : "") + (termo ? ' com "'+el("busca").value.trim()+'"' : "");
+    var labelExtra = "";
+    if(catFiltro) labelExtra += " em " + catFiltro;
+    if(valorFiltro){
+      var min = valorFiltro.min === 0 ? "" : (valorFiltro.min > 1e9 ? "" : " ≥ " + brlCurto(valorFiltro.min));
+      var max = valorFiltro.max === Infinity ? "" : " ≤ " + brlCurto(valorFiltro.max);
+      labelExtra += " (valor" + min + max + ")";
+    } else if(termoTexto){
+      labelExtra += ' com "' + buscaInput + '"';
+    }
+    el("totalRot").textContent = ROTULOS[periodo] + labelExtra;
     animarValor(el("total"), soma(lista));
+
+    var linhas = lista.map(function(g){ return {g:g, ent:false}; })
+      .concat(baseEnt.map(function(g){ return {g:g, ent:true}; }))
+      .sort(function(a,b){ return new Date(b.g.data) - new Date(a.g.data); });
 
     var ul = el("lista");
     ul.innerHTML = "";
-    if(!lista.length){
+    if(!linhas.length){
       var v = document.createElement("div");
       v.className = "vazio";
-      v.textContent = gastos.length ? "Nenhum gasto encontrado nesse filtro." : "Nenhum gasto ainda. Escreva acima e toque em Salvar gastos.";
+      v.textContent = (gastos.length || entradas.length) ? "Nada encontrado nesse filtro." : "Nenhum gasto ainda. Escreva acima e toque em Salvar gastos.";
       ul.appendChild(v);
       return;
     }
-    lista.forEach(function(g){
+    linhas.forEach(function(x){
+      var g = x.g;
       var li = document.createElement("li");
       li.setAttribute("data-id", g.id);
+      if(x.ent) li.classList.add("ent");
       if(novos[g.id] || animarLista){
         li.classList.add("entra");
         li.style.animationDelay = (Math.min(nEntrada++, 8) * (animarLista ? 40 : 70)) + "ms";
@@ -156,16 +245,27 @@
       }
       var d = document.createElement("div"); d.className = "desc";
       d.textContent = g.desc;
-      var s = document.createElement("small"); s.textContent = dataBonita(g.data); d.appendChild(s);
-      var sel = document.createElement("select");
-      sel.setAttribute("aria-label","Categoria de "+g.desc);
-      nomesCats().forEach(function(n){
-        var o = document.createElement("option"); o.value = n; o.textContent = n; sel.appendChild(o);
-      });
-      sel.value = catDe(g);
-      sel.addEventListener("change", function(){ g.cat = sel.value; salvarTudo(); desenhar(); });
-      d.appendChild(sel);
-      var val = document.createElement("span"); val.className = "val num"; val.textContent = brl(g.valor);
+      var s = document.createElement("small"); s.textContent = dataBonita(g) + (x.ent ? " · entrada" : ""); d.appendChild(s);
+      var val = document.createElement("span"); val.className = "val num" + (x.ent ? " pos" : "");
+      val.textContent = (x.ent ? "+ " : "") + brl(g.valor);
+
+      var ac = document.createElement("div"); ac.className = "acoes";
+      if(x.ent){
+        var esp = document.createElement("span"); esp.className = "esp"; ac.appendChild(esp);
+      } else {
+        var sel = document.createElement("select");
+        sel.setAttribute("aria-label","Categoria de "+g.desc);
+        nomesCats().forEach(function(n){
+          var o = document.createElement("option"); o.value = n; o.textContent = n; sel.appendChild(o);
+        });
+        sel.value = catDe(g);
+        sel.addEventListener("change", function(){ g.cat = sel.value; salvarTudo(); desenhar(); oferecerRegra(g.desc, g.cat); });
+        ac.appendChild(sel);
+      }
+      var bEd = document.createElement("button"); bEd.textContent = "Editar"; bEd.setAttribute("aria-label","Editar "+g.desc);
+      bEd.addEventListener("click", function(){ editarItem(li, g, x.ent); });
+      var bDup = document.createElement("button"); bDup.textContent = "Duplicar"; bDup.setAttribute("aria-label","Duplicar "+g.desc);
+      bDup.addEventListener("click", function(){ duplicarGasto(g, x.ent); });
       var b = document.createElement("button"); b.textContent = "Apagar"; b.setAttribute("aria-label","Apagar "+g.desc);
       b.addEventListener("click", function(){
         if(b.getAttribute("data-conf") === "1"){ apagar(g.id); return; }
@@ -174,9 +274,94 @@
           if(b.isConnected){ b.removeAttribute("data-conf"); b.textContent = "Apagar"; b.classList.remove("perigo"); }
         }, 4000);
       });
-      li.appendChild(d); li.appendChild(val); li.appendChild(b);
+      ac.appendChild(bEd); ac.appendChild(bDup); ac.appendChild(b);
+      li.appendChild(d); li.appendChild(val); li.appendChild(ac);
       ul.appendChild(li);
     });
+  }
+
+  // gasto do ciclo atual até hoje, comparado com o mesmo trecho do ciclo anterior
+  function compararMesPassado(){
+    var agora = new Date(), ini = inicioDoCiclo(agora);
+    var ant = new Date(ini.getFullYear(), ini.getMonth() - 1, ini.getDate());
+    var dias = Math.round((inicioDoDia(agora) - ini) / 86400000) + 1;
+    var lim = new Date(ant.getFullYear(), ant.getMonth(), ant.getDate() + dias);
+    if(lim > ini) lim = ini;
+    var a = 0, b = 0;
+    gastos.forEach(function(g){
+      var d = new Date(g.data);
+      if(d >= ini) b += g.valor;
+      else if(d >= ant && d < lim) a += g.valor;
+    });
+    return a > 0 ? {pct: (b - a) / a * 100} : null;
+  }
+
+  // Resumo rápido: comparação, recorrentes, entradas/saldo, metas e semanas
+  function renderResumoRapido(){
+    var box = el("resumoRapido");
+    if(!box) return;
+    var itens = [];
+
+    var cmp = compararMesPassado();
+    if(cmp) itens.push({label:"vs mês passado", valor:(cmp.pct >= 0 ? "↑ " : "↓ ") + Math.abs(Math.round(cmp.pct)) + "%", cls: cmp.pct > 0 ? "ruim" : "bom"});
+
+    var totalRec = soma(gastos.filter(function(g){ return g.recorrente && dentro(g, periodo); }));
+    if(totalRec > 0) itens.push({label:"Recorrentes", valor:brl(totalRec)});
+
+    var entP = soma(entradas.filter(function(g){ return dentro(g, periodo); }));
+    if(entP > 0){
+      var saldo = entP - soma(gastos.filter(function(g){ return dentro(g, periodo); }));
+      itens.push({label:"Entradas", valor:brl(entP)});
+      itens.push({label:"Saldo", valor:brl(saldo), cls: saldo < 0 ? "ruim" : "bom"});
+    }
+
+    // Meta do mês
+    if(cfg.meta){
+      var gastoMes = soma(gastos.filter(function(g){ return dentro(g, "mes"); }));
+      var pct = gastoMes / cfg.meta * 100;
+      if(pct >= 80){ itens.push({label:"Meta", valor:Math.round(pct) + "%", cls: pct >= 100 ? "ruim" : ""}); }
+    }
+    // Metas por categoria
+    var sc = somasPorCat(), nomes = nomesCats();
+    Object.keys(cfg.metasCat).forEach(function(c){
+      if(nomes.indexOf(c) === -1) return;
+      var pc = (sc[c] || 0) / cfg.metasCat[c] * 100;
+      if(pc >= 80) itens.push({label:c, valor:Math.round(pc) + "%", cls: pc >= 100 ? "ruim" : ""});
+    });
+
+    // Semanas do mês atual (segunda a domingo)
+    var mesGastos = gastos.filter(function(g){ return dentro(g, "mes"); });
+    if(mesGastos.length){
+      var inicioCiclo = inicioDoCiclo(new Date());
+      var fimCiclo = new Date(inicioCiclo.getFullYear(), inicioCiclo.getMonth() + 1, inicioCiclo.getDate());
+
+      var porSemana = {};
+      mesGastos.forEach(function(g){
+        var d = new Date(g.data);
+        if(d < inicioCiclo || d >= fimCiclo) return;
+        var diff = d.getDay() === 0 ? -6 : 1 - d.getDay();
+        var seg = new Date(d.getFullYear(), d.getMonth(), d.getDate() + diff).getTime();
+        porSemana[seg] = (porSemana[seg] || 0) + g.valor;
+      });
+
+      Object.keys(porSemana).map(Number).sort(function(a, b){ return a - b; }).slice(-5).forEach(function(ts){
+        var label = "Sem " + new Date(ts).toLocaleDateString("pt-BR", {day:"2-digit", month:"2-digit"});
+        itens.push({label: label, valor: brl(porSemana[ts])});
+      });
+    }
+
+    box.innerHTML = "";
+    itens.forEach(function(item){
+      var chip = document.createElement("div"); chip.className = "chip" + (item.cls ? " " + item.cls : "");
+      var a = document.createElement("span"); a.textContent = item.label;
+      var b = document.createElement("strong"); b.textContent = item.valor;
+      chip.appendChild(a); chip.appendChild(b);
+      box.appendChild(chip);
+    });
+    if(!itens.length){
+      var vazio = document.createElement("div"); vazio.className = "chip"; vazio.textContent = "Sem destaques";
+      box.appendChild(vazio);
+    }
   }
 
   function aviso(msg, tipo){
@@ -186,25 +371,46 @@
     a._t = setTimeout(function(){ a.classList.add("some"); }, 4500);
   }
 
+  function alertaMetasCat(antes){
+    var depois = somasPorCat(), msgs = [], nomes = nomesCats();
+    Object.keys(cfg.metasCat).forEach(function(c){
+      if(nomes.indexOf(c) === -1) return;
+      var m = cfg.metasCat[c], a = antes[c] || 0, d = depois[c] || 0;
+      if(a < m && d >= m) msgs.push(c + " passou da meta (" + brl(m) + ").");
+      else if(a < m * 0.8 && d >= m * 0.8 && d < m) msgs.push(c + " já usou 80% da meta.");
+    });
+    return msgs.join(" ");
+  }
+
   function adicionar(){
     var r = interpretar(el("texto").value);
     if(!r.ok.length){
       aviso(r.falhas.length ? 'Não achei valor em: "'+r.falhas.join('", "')+'". Escreva o número, ex: 5 chiclete.' : "Escreva pelo menos um gasto.", "erro");
       return;
     }
-    var agora = new Date().toISOString();
+    var agora = new Date();
     nEntrada = 0;
     var mesAntes = soma(gastos.filter(function(g){ return dentro(g, "mes"); }));
+    var catsAntes = somasPorCat();
     r.ok.forEach(function(x,i){
       var novoId = Date.now()+"-"+i;
       novos[novoId] = true;
-      gastos.push({id: novoId, valor:x.valor, desc:x.desc, cat:x.cat, data:agora});
+      var reg = {id: novoId, valor:x.valor, desc:x.desc, data:agora.toISOString()};
+      if(x.data && chaveDia(x.data) !== chaveDia(agora)){
+        reg.data = new Date(x.data.getFullYear(), x.data.getMonth(), x.data.getDate(), 12).toISOString();
+        reg.semHora = true;
+      }
+      if(x.ent) entradas.push(reg);
+      else { reg.cat = x.cat; gastos.push(reg); }
     });
     var gravou = salvarTudo();
-    var total = soma(r.ok);
-    var msg = r.ok.length+" gasto"+(r.ok.length>1?"s":"")+" salvo"+(r.ok.length>1?"s":"")+": "+brl(total)+".";
+    var sai = r.ok.filter(function(x){ return !x.ent; }), ent = r.ok.filter(function(x){ return x.ent; });
+    var partes = [];
+    if(sai.length) partes.push(sai.length+" gasto"+(sai.length>1?"s":"")+" salvo"+(sai.length>1?"s":"")+": "+brl(soma(sai))+".");
+    if(ent.length) partes.push(ent.length+" entrada"+(ent.length>1?"s":"")+" salva"+(ent.length>1?"s":"")+": +"+brl(soma(ent))+".");
+    var msg = partes.join(" ");
     if(r.falhas.length) msg += ' Não entendi: "'+r.falhas.join('", "')+'".';
-    var extraMeta = alertaMeta(mesAntes);
+    var extraMeta = sai.length ? [alertaMeta(mesAntes), alertaMetasCat(catsAntes)].filter(Boolean).join(" ") : "";
     if(extraMeta) msg += " " + extraMeta;
     if(!gravou) msg += " Atenção: não consegui gravar no aparelho, os dados somem ao fechar.";
     aviso(msg, (r.falhas.length || !gravou || extraMeta) ? "erro" : "ok");
@@ -245,15 +451,146 @@
     } else { removerGasto(id); }
   }
   function removerGasto(id){
-    var i = gastos.findIndex(function(g){ return g.id === id; });
+    var ent = false, i = gastos.findIndex(function(g){ return g.id === id; });
+    if(i < 0){ i = entradas.findIndex(function(g){ return g.id === id; }); ent = true; }
     if(i < 0) return;
-    apagado = gastos.splice(i,1)[0];
+    apagado = {g:(ent ? entradas : gastos).splice(i,1)[0], ent:ent};
     salvarTudo(); desenhar();
-    mostrarToast("Gasto apagado.");
+    mostrarToast(ent ? "Entrada apagada." : "Gasto apagado.");
   }
+
+  function duplicarGasto(g, ent){
+    var texto = (ent ? "+" : "") + String(g.valor).replace(".", ",") + " " + g.desc;
+    el("texto").value = texto;
+    el("texto").focus();
+    window.scrollTo(0, 0);
+    aviso("Duplicado — edite e salve", "ok");
+  }
+
+  function dataParaInput(iso){
+    var d = new Date(iso);
+    return d.getFullYear() + "-" + ("0" + (d.getMonth() + 1)).slice(-2) + "-" + ("0" + d.getDate()).slice(-2);
+  }
+  // edição no próprio item da lista: descrição, valor e data
+  function editarItem(li, g, ent){
+    li.innerHTML = ""; li.className = "editando";
+    function campo(tipo, valor, rotulo){
+      var i = document.createElement("input"); i.type = tipo; i.value = valor; i.setAttribute("aria-label", rotulo);
+      return i;
+    }
+    var campos = document.createElement("div"); campos.className = "edit-campos";
+    var iDesc = campo("text", g.desc, "Descrição"); iDesc.maxLength = 120;
+    var iVal = campo("text", String(g.valor).replace(".", ","), "Valor"); iVal.setAttribute("inputmode", "decimal");
+    var iData = campo("date", dataParaInput(g.data), "Data"); iData.max = dataParaInput(new Date().toISOString());
+    campos.appendChild(iDesc); campos.appendChild(iVal); campos.appendChild(iData);
+    var bots = document.createElement("div"); bots.className = "edit-botoes";
+    var bOk = document.createElement("button"); bOk.textContent = "Salvar"; bOk.className = "salvar";
+    var bNo = document.createElement("button"); bNo.textContent = "Cancelar";
+    bots.appendChild(bOk); bots.appendChild(bNo);
+    li.appendChild(campos); li.appendChild(bots);
+
+    function salvar(){
+      var v = paraNumero(iVal.value.replace(/[^0-9.,]/g, ""));
+      if(!isFinite(v) || v <= 0){ iVal.classList.add("erro"); iVal.focus(); return; }
+      var desc = iDesc.value.replace(/\s+/g, " ").trim();
+      if(!desc) desc = ent ? "entrada" : "sem descrição";
+      if(desc !== g.desc && cfg.corrigir) desc = corrigirTexto(desc);
+      g.valor = v; g.desc = desc.slice(0, 120);
+      if(iData.value && iData.value !== dataParaInput(g.data)){
+        var p = iData.value.split("-"), nd = new Date(+p[0], +p[1] - 1, +p[2], 12);
+        if(!isNaN(nd.getTime()) && nd <= new Date()){
+          if(chaveDia(nd) === chaveDia(new Date())){ g.data = new Date().toISOString(); delete g.semHora; }
+          else { g.data = nd.toISOString(); g.semHora = true; }
+        }
+      }
+      salvarTudo(); desenhar();
+    }
+    bOk.addEventListener("click", salvar);
+    bNo.addEventListener("click", desenhar);
+    [iDesc, iVal, iData].forEach(function(i){
+      i.addEventListener("keydown", function(e){
+        if(e.key === "Enter"){ e.preventDefault(); salvar(); }
+        else if(e.key === "Escape"){ desenhar(); }
+      });
+    });
+    iDesc.focus(); iDesc.select();
+  }
+
+  function exportarCSV(){
+    if(!gastos.length && !entradas.length){
+      avisoConfig("Não há lançamentos para exportar.");
+      return;
+    }
+    function esc(s){
+      return '"' + String(s).replace(/"/g, '""') + '"';
+    }
+    var todos = gastos.map(function(g){ return {g:g, t:"gasto"}; })
+      .concat(entradas.map(function(g){ return {g:g, t:"entrada"}; }))
+      .sort(function(a, b){ return new Date(a.g.data) - new Date(b.g.data); });
+    var linhas = ["data,valor,descricao,categoria,tipo"];
+    todos.forEach(function(x){
+      var g = x.g;
+      linhas.push(esc(g.data) + "," + String(g.valor).replace(",", ".") + "," + esc(g.desc) + "," + esc(x.t === "gasto" ? (g.cat || catDe(g)) : "") + "," + x.t);
+    });
+    var csv = "﻿" + linhas.join("\r\n"); // BOM pro Excel ler os acentos
+    var blob = new Blob([csv], {type:"text/csv;charset=utf-8"});
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement("a");
+    a.href = url;
+    var hoje = new Date().toISOString().slice(0, 10);
+    a.download = "contei-gastos-" + hoje + ".csv";
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(function(){ URL.revokeObjectURL(url); }, 2000);
+    avisoConfig("CSV exportado: " + a.download);
+  }
+
   el("desfazer").addEventListener("click", function(){
-    if(apagado){ novos[apagado.id] = true; nEntrada = 0; gastos.push(apagado); apagado = null; salvarTudo(); desenhar(); }
+    if(apagado){
+      novos[apagado.g.id] = true; nEntrada = 0;
+      (apagado.ent ? entradas : gastos).push(apagado.g);
+      apagado = null; salvarTudo(); desenhar();
+    }
     el("toast").classList.remove("on");
+  });
+
+  // ---------- aprender palavras: ao trocar a categoria, oferece lembrar ----------
+  var STOP = ["para","com","uma","uns","por","dos","das","que","sem","mais","pra","the"];
+  var regraPendente = null, aprenderTimer = null;
+  function palavraChave(desc){
+    var ws = normPalavra(desc).split(" ").filter(function(w){ return w.length >= 3 && !/^\d+$/.test(w) && STOP.indexOf(w) === -1; });
+    ws.sort(function(a, b){ return b.length - a.length; });
+    return ws[0] || "";
+  }
+  function esconderAprender(){
+    el("toastAprender").classList.remove("on"); regraPendente = null; clearTimeout(aprenderTimer);
+  }
+  function oferecerRegra(desc, cat){
+    var p = palavraChave(desc);
+    if(!p || cfg.regras.length >= 60) return;
+    if(cfg.regras.some(function(r){ return r.palavra === p && r.cat === cat; })) return;
+    if(categorizar(p) === cat) return; // essa palavra já cai nessa categoria
+    regraPendente = {palavra:p, cat:cat};
+    el("toastAprenderMsg").textContent = 'Sempre que aparecer "' + p + '", mandar pra ' + cat + '?';
+    el("toastAprender").classList.add("on");
+    clearTimeout(aprenderTimer);
+    aprenderTimer = setTimeout(esconderAprender, 8000);
+  }
+  function ensinar(palavra, cat){
+    cfg.regras = cfg.regras.filter(function(r){ return r.palavra !== palavra; });
+    cfg.regras.push({palavra:palavra, cat:cat});
+    var re = new RegExp("(^| )" + palavra + "(s|es)?( |$)"), qtd = 0;
+    gastos.forEach(function(g){
+      if(re.test(normPalavra(g.desc)) && g.cat !== cat){ g.cat = cat; qtd++; }
+    });
+    salvarCfg(); salvarTudo();
+    return qtd;
+  }
+  el("aprenderSim").addEventListener("click", function(){
+    var r = regraPendente; esconderAprender();
+    if(!r) return;
+    var qtd = ensinar(r.palavra, r.cat);
+    aviso('Pronto: "' + r.palavra + '" agora vai pra ' + r.cat + (qtd ? ". " + qtd + (qtd === 1 ? " gasto antigo foi atualizado." : " gastos antigos foram atualizados.") : "."), "ok");
+    desenhar();
   });
 
   el("salvar").addEventListener("click", adicionar);
@@ -274,7 +611,7 @@
 
   // ---------- configurações: correção de texto e tema ----------
   var CFG_CHAVE = "gastos_cfg_v1";
-  var cfg = {corrigir:true, modo:"escuro", tema:null, nome:"", catsExtra:[], regras:[], meta:0, diaMes:1, ultimoBackup:"", lembreteAte:0}; // tema null = padrão (segue claro/escuro do celular)
+  var cfg = {corrigir:true, modo:"escuro", tema:null, nome:"", catsExtra:[], regras:[], meta:0, diaMes:1, ultimoBackup:"", lembreteAte:0, fixos:[], metasCat:{}}; // tema null = padrão (segue claro/escuro do celular)
   var HEX = /^#[0-9a-f]{6}$/i;
 
   function carregarCfg(){
@@ -291,6 +628,14 @@
       cfg.diaMes = (typeof c.diaMes === "number" && c.diaMes >= 1 && c.diaMes <= 28) ? Math.floor(c.diaMes) : 1;
       cfg.ultimoBackup = typeof c.ultimoBackup === "string" ? c.ultimoBackup : "";
       cfg.lembreteAte = typeof c.lembreteAte === "number" ? c.lembreteAte : 0;
+      cfg.fixos = Array.isArray(c.fixos) ? c.fixos.filter(function(f){
+        return f && typeof f.id === "string" && typeof f.desc === "string" && typeof f.valor === "number" && f.valor > 0 &&
+          typeof f.dia === "number" && f.dia >= 1 && f.dia <= 28 && typeof f.ult === "number";
+      }).slice(0,20) : [];
+      cfg.metasCat = {};
+      if(c.metasCat && typeof c.metasCat === "object") Object.keys(c.metasCat).slice(0,20).forEach(function(k){
+        var v = c.metasCat[k]; if(typeof v === "number" && v > 0) cfg.metasCat[k] = v;
+      });
       cfg.modo = (c.modo === "claro" || c.modo === "personalizado") ? c.modo : (c.tema ? "personalizado" : "escuro");
       var t = c.tema;
       cfg.tema = (t && HEX.test(t.pri) && HEX.test(t.sec) && HEX.test(t.ter)) ? {pri:t.pri, sec:t.sec, ter:t.ter} : null;
@@ -303,7 +648,7 @@
     acougue:"açougue",atacadao:"atacadão",hortifruti:"hortifrúti",acucar:"açúcar",linguica:"linguiça",salmao:"salmão",
     maca:"maçã",limao:"limão",mamao:"mamão",melao:"melão",pimentao:"pimentão",sabao:"sabão",carvao:"carvão",
     almoco:"almoço",refeicao:"refeição",hamburguer:"hambúrguer",hamburger:"hambúrguer",sanduiche:"sanduíche",manha:"manhã",
-    saude:"saúde",farmacia:"farmácia",remedio:"remédio",medico:"médico",veterinario:"veterinário",racao:"ração",
+    saude:"saúde",salario:"salário",farmacia:"farmácia",remedio:"remédio",medico:"médico",veterinario:"veterinário",racao:"ração",
     onibus:"ônibus",metro:"metrô",taxi:"táxi",pedagio:"pedágio",oleo:"óleo",mecanico:"mecânico",pecas:"peças",revisao:"revisão",
     gas:"gás",botijao:"botijão",alcool:"álcool",combustivel:"combustível",higienico:"higiênico",
     cartao:"cartão",condominio:"condomínio",credito:"crédito",debito:"débito",emprestimo:"empréstimo",
@@ -498,28 +843,243 @@
     var nomes = Object.keys(somas).sort(function(a, b){ return somas[b] - somas[a]; });
     if(!nomes.length){
       var vazio = document.createElement("p"); vazio.textContent = "Nenhum gasto este mês ainda."; box.appendChild(vazio);
-      return;
+    } else {
+      nomes.forEach(function(n){
+        var pct = somas[n] / totalMes * 100;
+        var linha = document.createElement("div"); linha.className = "b";
+        var t = document.createElement("div"); t.className = "t";
+        var a = document.createElement("span"); a.textContent = n;
+        var v = document.createElement("span"); v.textContent = brl(somas[n]) + " · " + Math.round(pct) + "%";
+        t.appendChild(a); t.appendChild(v);
+        var f = document.createElement("div"); f.className = "f";
+        var barra = document.createElement("i"); f.appendChild(barra);
+        linha.appendChild(t); linha.appendChild(f); box.appendChild(linha);
+        requestAnimationFrame(function(){ requestAnimationFrame(function(){ barra.style.width = pct + "%"; }); });
+      });
     }
+
+    renderMetasCat(somas);
+    renderGrafico();
+  }
+
+  // ---------- gráfico do perfil: se adapta à quantidade de meses com dados ----------
+  // 1 mês de dados -> dia a dia | 2 meses -> acumulado lado a lado | 3+ -> todos os meses
+  function idxCiclo(d){
+    var D = cfg.diaMes || 1, m = d.getFullYear() * 12 + d.getMonth();
+    return d.getDate() >= D ? m : m - 1;
+  }
+  function iniCiclo(i){ return new Date(Math.floor(i / 12), i % 12, cfg.diaMes || 1); }
+  function nomeCiclo(i, comAno){
+    var d = iniCiclo(i);
+    var s = d.toLocaleDateString("pt-BR", {month:"short"}).replace(".", "");
+    return comAno ? s + "/" + String(d.getFullYear()).slice(2) : s;
+  }
+  function diasDoCiclo(i){ return Math.round((iniCiclo(i + 1) - iniCiclo(i)) / 86400000); }
+  function somasPorCiclo(){
+    var r = {};
+    gastos.forEach(function(g){ var i = idxCiclo(new Date(g.data)); r[i] = (r[i] || 0) + g.valor; });
+    return r;
+  }
+  function porDiaDoCiclo(i){
+    var n = diasDoCiclo(i), arr = new Array(n).fill(0), ini = iniCiclo(i);
+    gastos.forEach(function(g){
+      var d = new Date(g.data);
+      if(idxCiclo(d) !== i) return;
+      var k = Math.round((inicioDoDia(d) - ini) / 86400000);
+      if(k >= 0 && k < n) arr[k] += g.valor;
+    });
+    return arr;
+  }
+  function acumular(arr){ var s = 0; return arr.map(function(v){ s += v; return s; }); }
+
+  function renderGrafico(){
+    var canvas = el("graficoLinha");
+    if(!canvas) return;
+    var somas = somasPorCiclo();
+    var idxs = Object.keys(somas).map(Number).sort(function(a, b){ return a - b; });
+    var atual = idxCiclo(new Date());
+    var modo = idxs.length <= 1 ? "dia" : (idxs.length === 2 ? "comp" : "meses");
+    var anoTb = idxs.length === 2 && idxs[1] - idxs[0] > 11;
+    var nomeA = modo === "comp" ? nomeCiclo(idxs[0], anoTb) : "", nomeB = modo === "comp" ? nomeCiclo(idxs[1], anoTb) : "";
+    el("tituloGrafico").textContent = modo === "dia" ? "Gasto por dia do mês" : (modo === "comp" ? "Acumulado: " + nomeA + " × " + nomeB : "Gasto por mês");
+
+    var ctx = canvas.getContext("2d");
+    var dpr = window.devicePixelRatio || 1;
+    var width = canvas.getBoundingClientRect().width, height = 170;
+    if(!width) return;
+    canvas.width = Math.round(width * dpr);
+    canvas.height = Math.round(height * dpr);
+    canvas.style.height = height + "px";
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, width, height);
+
+    var cs = getComputedStyle(document.documentElement);
+    var accent = cs.getPropertyValue("--accent").trim() || "#f2b632";
+    var corMuted = cs.getPropertyValue("--muted").trim() || "#9aa7c4";
+    var corInk = cs.getPropertyValue("--ink").trim() || "#eef1f8";
+    var corLinha = cs.getPropertyValue("--line").trim() || "#2a3858";
+    var rgbA = hexParaRgb(accent);
+    var areaCor = "rgba(" + rgbA.r + "," + rgbA.g + "," + rgbA.b + ",0.15)";
+    var L = 44, R = width - 14, T = 24, B = height - 26, W = R - L, H = B - T;
+
+    function eixoY(max){
+      ctx.font = "11px system-ui"; ctx.textAlign = "right"; ctx.textBaseline = "middle"; ctx.lineWidth = 1;
+      for(var t = 0; t <= 2; t++){
+        var y = B - H * t / 2;
+        ctx.strokeStyle = corLinha; ctx.beginPath(); ctx.moveTo(L, y); ctx.lineTo(R, y); ctx.stroke();
+        ctx.fillStyle = corMuted; ctx.fillText(brlCurto(max * t / 2), L - 8, y);
+      }
+    }
+    function curva(pts, jaNoCaminho){
+      if(jaNoCaminho) ctx.lineTo(pts[0][0], pts[0][1]); else ctx.moveTo(pts[0][0], pts[0][1]);
+      for(var i = 1; i < pts.length; i++){
+        var cx = (pts[i - 1][0] + pts[i][0]) / 2;
+        ctx.bezierCurveTo(cx, pts[i - 1][1], cx, pts[i][1], pts[i][0], pts[i][1]);
+      }
+    }
+    function rotulosX(n, texto){
+      var passo = n <= 15 ? 1 : (n <= 25 ? 2 : 3);
+      ctx.font = "11px system-ui"; ctx.fillStyle = corMuted; ctx.textAlign = "center"; ctx.textBaseline = "top";
+      for(var i = 0; i < n; i += passo) ctx.fillText(String(texto(i)), L + W * i / Math.max(1, n - 1), B + 6);
+    }
+    function clampK(x, n){ return Math.max(0, Math.min(n - 1, Math.round((x - L) / W * (n - 1)))); }
+
+    if(modo === "dia"){
+      var arr = porDiaDoCiclo(atual), n = arr.length, ini = iniCiclo(atual);
+      var max = Math.max.apply(null, arr) || 1;
+      var xAt = function(k){ return L + W * k / (n - 1); }, yAt = function(v){ return B - H * v / max; };
+      var rot = function(k){ return new Date(ini.getFullYear(), ini.getMonth(), ini.getDate() + k).getDate(); };
+      eixoY(max);
+      var pts = arr.map(function(v, k){ return [xAt(k), yAt(v)]; });
+      ctx.beginPath(); ctx.moveTo(L, B); curva(pts, true); ctx.lineTo(R, B); ctx.closePath();
+      ctx.fillStyle = areaCor; ctx.fill();
+      ctx.beginPath(); curva(pts, false);
+      ctx.strokeStyle = accent; ctx.lineWidth = 2; ctx.lineCap = "round"; ctx.lineJoin = "round"; ctx.stroke();
+      ctx.fillStyle = accent;
+      arr.forEach(function(v, k){ if(v > 0){ ctx.beginPath(); ctx.arc(xAt(k), yAt(v), 3, 0, Math.PI * 2); ctx.fill(); } });
+      rotulosX(n, rot);
+      canvas._hit = function(x, y){
+        if(x < L || x > R || y < T || y > B) return null;
+        var k = clampK(x, n);
+        if(!arr[k]) return null;
+        return {texto:"Dia " + rot(k) + " · " + brl(arr[k]), x:xAt(k), y:yAt(arr[k])};
+      };
+    } else if(modo === "comp"){
+      var a = idxs[0], b = idxs[1];
+      var cumA = acumular(porDiaDoCiclo(a)), cumB = acumular(porDiaDoCiclo(b));
+      if(b === atual) cumB = cumB.slice(0, Math.round((inicioDoDia(new Date()) - iniCiclo(b)) / 86400000) + 1);
+      var nn = Math.max(cumA.length, diasDoCiclo(b));
+      var mx = Math.max(cumA[cumA.length - 1], cumB[cumB.length - 1]) || 1;
+      var xA = function(k){ return L + W * k / (nn - 1); }, yA = function(v){ return B - H * v / mx; };
+      eixoY(mx);
+      var serie = function(cum, cor, tracejado){
+        if(!cum.length) return;
+        var p = cum.map(function(v, k){ return [xA(k), yA(v)]; });
+        if(!tracejado){
+          ctx.beginPath(); ctx.moveTo(p[0][0], B); curva(p, true); ctx.lineTo(p[p.length - 1][0], B); ctx.closePath();
+          ctx.fillStyle = areaCor; ctx.fill();
+        }
+        ctx.beginPath(); curva(p, false);
+        ctx.strokeStyle = cor; ctx.lineWidth = tracejado ? 1.5 : 2.5; ctx.lineCap = "round"; ctx.lineJoin = "round";
+        ctx.setLineDash(tracejado ? [5, 4] : []); ctx.stroke(); ctx.setLineDash([]);
+        if(!tracejado){
+          ctx.fillStyle = cor; ctx.beginPath(); ctx.arc(p[p.length - 1][0], p[p.length - 1][1], 3.5, 0, Math.PI * 2); ctx.fill();
+        }
+      };
+      serie(cumA, corMuted, true);
+      serie(cumB, accent, false);
+      // legenda
+      ctx.font = "11px system-ui"; ctx.textAlign = "left"; ctx.textBaseline = "middle";
+      ctx.strokeStyle = corMuted; ctx.lineWidth = 1.5; ctx.setLineDash([5, 4]);
+      ctx.beginPath(); ctx.moveTo(L, 10); ctx.lineTo(L + 18, 10); ctx.stroke(); ctx.setLineDash([]);
+      ctx.fillStyle = corMuted; ctx.fillText(nomeA, L + 24, 10);
+      var lx = L + 24 + ctx.measureText(nomeA).width + 16;
+      ctx.strokeStyle = accent; ctx.lineWidth = 2.5;
+      ctx.beginPath(); ctx.moveTo(lx, 10); ctx.lineTo(lx + 18, 10); ctx.stroke();
+      ctx.fillStyle = corInk; ctx.fillText(nomeB, lx + 24, 10);
+      rotulosX(nn, function(k){ return k + 1; });
+      canvas._hit = function(x, y){
+        if(x < L || x > R || y < T || y > B) return null;
+        var k = clampK(x, nn);
+        var ta = cumA[k] !== undefined ? brl(cumA[k]) : "–", tb = cumB[k] !== undefined ? brl(cumB[k]) : "–";
+        return {texto:"Dia " + (k + 1) + " · " + nomeA + " " + ta + " · " + nomeB + " " + tb, x:xA(k), y:yA(Math.max(cumA[k] || 0, cumB[k] || 0))};
+      };
+    } else {
+      var first = idxs[0], last = Math.max(atual, idxs[idxs.length - 1]), nm = last - first + 1;
+      var vals = []; for(var i = 0; i < nm; i++) vals.push(somas[first + i] || 0);
+      var mm = Math.max.apply(null, vals) || 1;
+      var slot = W / nm, bw = Math.max(3, Math.min(34, slot * 0.62));
+      eixoY(mm);
+      vals.forEach(function(v, k){
+        var h = H * v / mm, x = L + slot * k + (slot - bw) / 2;
+        ctx.fillStyle = first + k === atual ? accent : "rgba(" + rgbA.r + "," + rgbA.g + "," + rgbA.b + ",0.55)";
+        ctx.fillRect(x, B - h, bw, v > 0 ? Math.max(h, 1) : 0);
+      });
+      var passo = Math.max(1, Math.ceil(40 / slot));
+      ctx.font = "11px system-ui"; ctx.fillStyle = corMuted; ctx.textAlign = "center"; ctx.textBaseline = "top";
+      for(var k = nm - 1; k >= 0; k -= passo) ctx.fillText(nomeCiclo(first + k, nm > 12), L + slot * k + slot / 2, B + 6);
+      canvas._hit = function(x, y){
+        if(x < L || x > R || y < T || y > B) return null;
+        var k = Math.floor((x - L) / slot);
+        if(k < 0 || k >= nm) return null;
+        return {texto:nomeCiclo(first + k, true) + " · " + brl(vals[k]), x:L + slot * k + slot / 2, y:B - H * vals[k] / mm};
+      };
+    }
+  }
+  var resizeT = null;
+  window.addEventListener("resize", function(){
+    clearTimeout(resizeT);
+    resizeT = setTimeout(function(){
+      if(el("tela-perfil").classList.contains("ativa")) renderGrafico();
+    }, 150);
+  });
+
+  // barras de progresso das metas por categoria (Perfil)
+  function renderMetasCat(somas){
+    var bloco = el("blocoMetasCat"), box = el("barrasMetas"); box.innerHTML = "";
+    var nomes = Object.keys(cfg.metasCat).filter(function(c){ return nomesCats().indexOf(c) !== -1; });
+    bloco.hidden = !nomes.length;
+    if(!nomes.length) return;
+    nomes.sort(function(a, b){ return (somas[b] || 0) / cfg.metasCat[b] - (somas[a] || 0) / cfg.metasCat[a]; });
     nomes.forEach(function(n){
-      var pct = somas[n] / totalMes * 100;
-      var linha = document.createElement("div"); linha.className = "b";
+      var gasto = somas[n] || 0, meta = cfg.metasCat[n], pct = gasto / meta * 100;
+      var linha = document.createElement("div"); linha.className = "b cmeta" + (pct >= 100 ? " estourou" : (pct >= 80 ? " perto" : ""));
       var t = document.createElement("div"); t.className = "t";
       var a = document.createElement("span"); a.textContent = n;
-      var v = document.createElement("span"); v.textContent = brl(somas[n]) + " · " + Math.round(pct) + "%";
+      var v = document.createElement("span"); v.textContent = brl(gasto) + " de " + brl(meta) + " · " + Math.round(pct) + "%";
       t.appendChild(a); t.appendChild(v);
       var f = document.createElement("div"); f.className = "f";
       var barra = document.createElement("i"); f.appendChild(barra);
       linha.appendChild(t); linha.appendChild(f); box.appendChild(linha);
-      requestAnimationFrame(function(){ requestAnimationFrame(function(){ barra.style.width = pct + "%"; }); });
+      requestAnimationFrame(function(){ requestAnimationFrame(function(){ barra.style.width = Math.min(100, pct) + "%"; }); });
     });
   }
+
+  // Render gráfico de comparação de gastos por mês
+
+  function hexParaRgb(hex){
+    var h = hex.replace("#", "");
+    if(h.length === 3) h = h.split("").map(function(c){ return c + c; }).join("");
+    var r = parseInt(h.slice(0,2), 16);
+    var g = parseInt(h.slice(2,4), 16);
+    var b = parseInt(h.slice(4,6), 16);
+    return {r: r, g: g, b: b};
+  }
+
+  function brlCurto(n){
+    if(n >= 1000) return (n/1000).toFixed(1).replace(".", ",") + "k";
+    return n.toLocaleString("pt-BR",{style:"currency",currency:"BRL", minimumFractionDigits: 0, maximumFractionDigits: 0});
+  }
+
   el("nomeUsuario").addEventListener("input", function(){
     cfg.nome = el("nomeUsuario").value.slice(0, 30);
     salvarCfg();
     el("avatar").textContent = inicialDoNome();
   });
   el("btnExportar").addEventListener("click", function(){
-    var dados = {app:"contei", versao:1, exportadoEm:new Date().toISOString(), nome:cfg.nome || "", categorias:cfg.catsExtra, regras:cfg.regras, gastos:gastos};
+    var dados = {app:"contei", versao:2, exportadoEm:new Date().toISOString(), nome:cfg.nome || "", categorias:cfg.catsExtra, regras:cfg.regras,
+      config:{meta:cfg.meta, diaMes:cfg.diaMes, modo:cfg.modo, tema:cfg.tema, corrigir:cfg.corrigir, metasCat:cfg.metasCat},
+      fixos:cfg.fixos, entradas:entradas, gastos:gastos};
     var blob = new Blob([JSON.stringify(dados, null, 2)], {type:"application/json"});
     var url = URL.createObjectURL(blob);
     var a = document.createElement("a");
@@ -529,6 +1089,7 @@
     cfg.ultimoBackup = new Date().toISOString(); salvarCfg(); renderConfig();
     avisoConfig("Backup gerado. Guarde o arquivo num lugar seguro.");
   });
+  el("btnExportarCSV").addEventListener("click", exportarCSV);
   el("btnImportar").addEventListener("click", function(){ el("arqImportar").click(); });
   el("arqImportar").addEventListener("change", function(){
     var arq = el("arqImportar").files[0]; if(!arq) return;
@@ -538,19 +1099,29 @@
         var d = JSON.parse(leitor.result);
         var lista = Array.isArray(d) ? d : d.gastos;
         if(!Array.isArray(lista)) throw new Error("formato");
-        var ids = {}; gastos.forEach(function(g){ ids[g.id] = true; });
+        var ids = {}; gastos.concat(entradas).forEach(function(g){ ids[g.id] = true; });
         var qtd = 0;
-        lista.forEach(function(g){
-          if(!g || typeof g.valor !== "number" || !isFinite(g.valor) || g.valor <= 0) return;
-          if(typeof g.desc !== "string" || !g.data || isNaN(new Date(g.data).getTime())) return;
-          var id = String(g.id || (Date.now() + "-" + qtd));
-          if(ids[id]) return;
-          ids[id] = true;
-          var catImp = typeof g.cat === "string" ? g.cat : undefined;
-          if(catImp){ garantirCategoria(catImp); if(nomesCats().indexOf(catImp) === -1) catImp = undefined; }
-          gastos.push({id:id, valor:g.valor, desc:g.desc.slice(0, 120), cat:catImp, data:g.data});
-          qtd++;
-        });
+        function importar(itens, destino, ent){
+          itens.forEach(function(g){
+            if(!g || typeof g.valor !== "number" || !isFinite(g.valor) || g.valor <= 0) return;
+            if(typeof g.desc !== "string" || !g.data || isNaN(new Date(g.data).getTime())) return;
+            var id = String(g.id || (Date.now() + "-" + qtd + (ent ? "e" : "")));
+            if(ids[id]) return;
+            ids[id] = true;
+            var reg = {id:id, valor:g.valor, desc:g.desc.slice(0, 120), data:g.data};
+            if(!ent){
+              var catImp = typeof g.cat === "string" ? g.cat : undefined;
+              if(catImp){ garantirCategoria(catImp); if(nomesCats().indexOf(catImp) === -1) catImp = undefined; }
+              reg.cat = catImp;
+            }
+            if(g.semHora === true) reg.semHora = true;
+            if(g.recorrente === true) reg.recorrente = true;
+            destino.push(reg);
+            qtd++;
+          });
+        }
+        importar(lista, gastos, false);
+        if(Array.isArray(d.entradas)) importar(d.entradas, entradas, true);
         if(Array.isArray(d.categorias)) d.categorias.forEach(garantirCategoria);
         if(Array.isArray(d.regras)) d.regras.forEach(function(r){
           if(!r || typeof r.palavra !== "string" || typeof r.cat !== "string") return;
@@ -559,6 +1130,26 @@
           if(cfg.regras.some(function(x){ return x.palavra === pal; })) return;
           cfg.regras.push({palavra:pal, cat:r.cat});
         });
+        if(Array.isArray(d.fixos)) d.fixos.forEach(function(f){
+          if(!f || typeof f.desc !== "string" || typeof f.valor !== "number" || !(f.valor > 0)) return;
+          if(typeof f.dia !== "number" || f.dia < 1 || f.dia > 28 || typeof f.ult !== "number") return;
+          var fid = String(f.id || novoIdFixo());
+          if(cfg.fixos.length >= 20 || cfg.fixos.some(function(x){ return x.id === fid; })) return;
+          cfg.fixos.push({id:fid, desc:f.desc.slice(0, 40), valor:f.valor, dia:Math.floor(f.dia), ult:Math.floor(f.ult)});
+        });
+        var c = d.config;
+        if(c && typeof c === "object"){
+          if(typeof c.meta === "number" && c.meta > 0) cfg.meta = c.meta;
+          if(typeof c.diaMes === "number" && c.diaMes >= 1 && c.diaMes <= 28) cfg.diaMes = Math.floor(c.diaMes);
+          if(typeof c.corrigir === "boolean"){ cfg.corrigir = c.corrigir; el("optCorrigir").checked = c.corrigir; }
+          var t = c.tema;
+          if(t && HEX.test(t.pri) && HEX.test(t.sec) && HEX.test(t.ter)) cfg.tema = {pri:t.pri, sec:t.sec, ter:t.ter};
+          if(c.modo === "claro" || c.modo === "escuro" || (c.modo === "personalizado" && cfg.tema)) cfg.modo = c.modo;
+          if(c.metasCat && typeof c.metasCat === "object") Object.keys(c.metasCat).forEach(function(k){
+            if(typeof c.metasCat[k] === "number" && c.metasCat[k] > 0 && nomesCats().indexOf(k) !== -1 && (cfg.metasCat[k] || Object.keys(cfg.metasCat).length < 20)) cfg.metasCat[k] = c.metasCat[k];
+          });
+          aplicarTema(); desenharModos(); desenharPredef(); sincronizarCores();
+        }
         salvarCfg(); salvarTudo(); renderConfig();
         avisoConfig(qtd + (qtd === 1 ? " gasto importado." : " gastos importados."));
       }catch(e){ avisoConfig("Não consegui ler esse arquivo. Use um backup gerado pelo Contei."); }
@@ -584,6 +1175,8 @@
   function montarDias(){
     var s = el("diaMes"); s.innerHTML = "";
     for(var i = 1; i <= 28; i++){ var o = document.createElement("option"); o.value = String(i); o.textContent = "Dia " + i; s.appendChild(o); }
+    var f = el("fixoDia"); f.innerHTML = "";
+    for(var j = 1; j <= 28; j++){ var o2 = document.createElement("option"); o2.value = String(j); o2.textContent = "Dia " + j; f.appendChild(o2); }
   }
   function itemCfg(texto, rotuloBotao, aoClicar, ariaBotao){
     var linha = document.createElement("div"); linha.className = "item-cfg";
@@ -615,11 +1208,35 @@
         salvarCfg(); renderConfig();
       }, "Remover palavra " + r.palavra));
     });
+    // metas por categoria
+    var ms = el("metaCatSel"), atualM = ms.value; ms.innerHTML = "";
+    nomesCats().forEach(function(n){ var o = document.createElement("option"); o.value = n; o.textContent = n; ms.appendChild(o); });
+    if(atualM) ms.value = atualM;
+    if(!ms.value) ms.selectedIndex = 0;
+    var lm = el("listaMetasCat"); lm.innerHTML = "";
+    var chavesM = Object.keys(cfg.metasCat);
+    if(!chavesM.length){ var pm = document.createElement("p"); pm.textContent = "Nenhuma meta por categoria ainda."; lm.appendChild(pm); }
+    chavesM.forEach(function(c){
+      lm.appendChild(itemCfg(c + ": " + brl(cfg.metasCat[c]) + " por mês", "Remover", function(){
+        delete cfg.metasCat[c]; salvarCfg(); renderConfig();
+      }, "Remover meta de " + c));
+    });
+    // gastos fixos
+    var lf = el("listaFixos"); lf.innerHTML = "";
+    if(!cfg.fixos.length){ var pf = document.createElement("p"); pf.textContent = "Nenhum gasto fixo ainda."; lf.appendChild(pf); }
+    cfg.fixos.forEach(function(f){
+      lf.appendChild(itemCfg(f.desc + " · " + brl(f.valor) + " · dia " + f.dia, "Remover", function(){
+        cfg.fixos = cfg.fixos.filter(function(x){ return x !== f; });
+        salvarCfg(); renderConfig();
+        avisoConfig('Fixo "' + f.desc + '" removido. Os lançamentos que já foram feitos continuam.');
+      }, "Remover gasto fixo " + f.desc));
+    });
     el("ultimoBackup").textContent = cfg.ultimoBackup ? "Último backup: " + new Date(cfg.ultimoBackup).toLocaleDateString("pt-BR") + "." : "Você ainda não fez backup.";
   }
   function removerCategoria(nome){
     cfg.catsExtra = cfg.catsExtra.filter(function(n){ return n !== nome; });
     cfg.regras = cfg.regras.filter(function(r){ return r.cat !== nome; });
+    delete cfg.metasCat[nome];
     gastos.forEach(function(g){ if(g.cat === nome) g.cat = categorizar(g.desc); });
     salvarCfg(); salvarTudo(); renderConfig();
     avisoConfig('Categoria "' + nome + '" removida. Os gastos dela foram reclassificados.');
@@ -642,13 +1259,7 @@
     if(!cat){ avisoConfig("Escolha a categoria."); return; }
     if(palavra.length > 30){ avisoConfig("Use até 30 letras na palavra."); return; }
     if(cfg.regras.length >= 60){ avisoConfig("Limite de palavras ensinadas atingido."); return; }
-    cfg.regras = cfg.regras.filter(function(r){ return r.palavra !== palavra; });
-    cfg.regras.push({palavra:palavra, cat:cat});
-    var re = new RegExp("(^| )" + palavra + "(s|es)?( |$)"), qtd = 0;
-    gastos.forEach(function(g){
-      if(re.test(normPalavra(g.desc)) && g.cat !== cat){ g.cat = cat; qtd++; }
-    });
-    salvarCfg(); salvarTudo();
+    var qtd = ensinar(palavra, cat);
     el("regraPalavra").value = ""; renderConfig();
     avisoConfig('Pronto: "' + palavra + '" agora vai pra ' + cat + (qtd ? ". " + qtd + (qtd === 1 ? " gasto antigo foi atualizado." : " gastos antigos foram atualizados.") : "."));
   });
@@ -667,15 +1278,69 @@
   });
   el("btnApagarTudo").addEventListener("click", function(){
     var b = el("btnApagarTudo");
-    function normal(){ b.removeAttribute("data-conf"); b.textContent = "Apagar todos os gastos"; b.classList.remove("perigo"); }
+    function normal(){ b.removeAttribute("data-conf"); b.textContent = "Apagar todos os lançamentos"; b.classList.remove("perigo"); }
     if(b.getAttribute("data-conf") === "1"){
-      gastos = []; apagado = null; salvarTudo(); normal();
-      avisoConfig("Todos os gastos foram apagados.");
+      gastos = []; entradas = []; apagado = null; salvarTudo(); normal();
+      avisoConfig("Todos os lançamentos foram apagados.");
       return;
     }
     b.setAttribute("data-conf", "1"); b.textContent = "Certeza? Toque de novo"; b.classList.add("perigo");
     setTimeout(function(){ if(b.getAttribute("data-conf") === "1") normal(); }, 4000);
   });
+  el("btnMetaCat").addEventListener("click", function(){
+    var c = el("metaCatSel").value, txt = el("metaCatVal").value.trim();
+    if(!c){ avisoConfig("Escolha a categoria."); return; }
+    if(!txt){
+      if(cfg.metasCat[c]){ delete cfg.metasCat[c]; salvarCfg(); renderConfig(); avisoConfig("Meta de " + c + " removida."); }
+      else avisoConfig("Escreva o valor da meta, ex: 400.");
+      return;
+    }
+    var v = paraNumero(txt.replace(/[^0-9.,]/g, ""));
+    if(!isFinite(v) || v <= 0){ avisoConfig("Escreva um valor válido, ex: 400."); return; }
+    if(!cfg.metasCat[c] && Object.keys(cfg.metasCat).length >= 20){ avisoConfig("Limite de 20 metas por categoria."); return; }
+    cfg.metasCat[c] = v; salvarCfg();
+    el("metaCatVal").value = ""; renderConfig();
+    avisoConfig("Meta de " + c + ": " + brl(v) + " por mês.");
+  });
+
+  // ---------- gastos fixos (lançam sozinhos todo mês) ----------
+  function novoIdFixo(){ return Date.now().toString(36) + Math.random().toString(36).slice(2, 5); }
+  function lancarFixos(){
+    var agora = new Date(), hojeIdx = agora.getFullYear() * 12 + agora.getMonth(), mudou = false;
+    cfg.fixos.forEach(function(f){
+      for(var i = f.ult + 1, n = 0; i <= hojeIdx && n < 24; i++, n++){
+        var y = Math.floor(i / 12), m = i % 12;
+        var dt = new Date(y, m, Math.min(f.dia, new Date(y, m + 1, 0).getDate()), 12);
+        if(inicioDoDia(dt) > inicioDoDia(agora)) break;
+        var id = "fx-" + f.id + "-" + i;
+        if(!gastos.some(function(g){ return g.id === id; })){
+          gastos.push({id:id, valor:f.valor, desc:f.desc, cat:categorizar(f.desc), data:dt.toISOString(), semHora:true, recorrente:true});
+        }
+        f.ult = i; mudou = true;
+      }
+    });
+    if(mudou){ salvarTudo(); salvarCfg(); }
+    return mudou;
+  }
+  el("btnAddFixo").addEventListener("click", function(){
+    var desc = el("fixoDesc").value.trim().replace(/\s+/g, " ");
+    var v = paraNumero(el("fixoValor").value.replace(/[^0-9.,]/g, ""));
+    var dia = parseInt(el("fixoDia").value, 10) || 1;
+    if(!desc){ avisoConfig("Escreva a descrição, ex: Aluguel."); return; }
+    if(!isFinite(v) || v <= 0){ avisoConfig("Escreva um valor válido, ex: 1200."); return; }
+    if(cfg.fixos.length >= 20){ avisoConfig("Limite de 20 gastos fixos."); return; }
+    if(cfg.corrigir) desc = corrigirTexto(desc);
+    var agora = new Date();
+    cfg.fixos.push({id:novoIdFixo(), desc:desc.slice(0, 40), valor:v, dia:dia, ult:agora.getFullYear() * 12 + agora.getMonth() - 1});
+    var lancou = lancarFixos();
+    salvarCfg();
+    el("fixoDesc").value = ""; el("fixoValor").value = ""; renderConfig();
+    avisoConfig("Fixo criado: " + desc + ", " + brl(v) + " todo dia " + dia + "." + (lancou ? " Já lancei o deste mês." : ""));
+  });
+  document.addEventListener("visibilitychange", function(){
+    if(!document.hidden && lancarFixos()) desenhar();
+  });
+
   function renderMeta(){
     var box = el("metaBox");
     if(!cfg.meta){ box.hidden = true; return; }
@@ -713,6 +1378,7 @@
 
   carregar();
   carregarCfg();
+  lancarFixos();
   aplicarTema();
   el("optCorrigir").checked = cfg.corrigir;
   montarDias(); renderConfig();
@@ -720,6 +1386,38 @@
   desenharPredef();
   sincronizarCores();
   desenhar();
+
+  // Tooltip do gráfico (funciona nos 3 modos via canvas._hit)
+  (function(){
+    var canvas = el("graficoLinha");
+    if(!canvas) return;
+    var tooltip = document.createElement("div");
+    tooltip.style.cssText = "position:absolute;pointer-events:none;background:var(--card);border:1px solid var(--line);border-radius:8px;padding:6px 10px;font-size:.8rem;color:var(--ink);box-shadow:0 4px 16px rgba(0,0,0,.3);z-index:50;opacity:0;transition:opacity .15s ease;transform:translate(-50%,-100%);margin-top:-6px;white-space:nowrap";
+    document.body.appendChild(tooltip);
+
+    function mostrarTooltip(e){
+      if(!canvas._hit) return;
+      var rect = canvas.getBoundingClientRect();
+      var clientX = e.touches ? e.touches[0].clientX : e.clientX;
+      var clientY = e.touches ? e.touches[0].clientY : e.clientY;
+      var h = canvas._hit(clientX - rect.left, clientY - rect.top);
+      if(!h){ tooltip.style.opacity = "0"; return; }
+      tooltip.textContent = h.texto;
+      var meia = tooltip.offsetWidth / 2 + 8;
+      var x = Math.max(meia, Math.min(document.documentElement.clientWidth - meia, rect.left + h.x));
+      tooltip.style.left = (x + window.scrollX) + "px";
+      tooltip.style.top = (rect.top + h.y + window.scrollY) + "px";
+      tooltip.style.opacity = "1";
+    }
+    function esconderTooltip(){ tooltip.style.opacity = "0"; }
+
+    canvas.addEventListener("mousemove", mostrarTooltip);
+    canvas.addEventListener("mouseleave", esconderTooltip);
+    canvas.addEventListener("touchstart", mostrarTooltip, {passive: true});
+    canvas.addEventListener("touchmove", mostrarTooltip, {passive: true});
+    canvas.addEventListener("touchend", esconderTooltip);
+    canvas.addEventListener("touchcancel", esconderTooltip);
+  })();
 })();
 
 // ---------- efeito glass de pressão (iPhone) ----------

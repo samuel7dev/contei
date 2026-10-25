@@ -1,5 +1,5 @@
-const V = "gastos-v1";
-const ARQ = ["./", "index.html", "manifest.webmanifest", "icon-192.png", "icon-512.png"];
+const V = "contei-v1";
+const ARQ = ["./", "index.html", "estilo.css", "app.js", "manifest.json", "icone-192.png", "icone-512.png"];
 self.addEventListener("install", function(e){
   e.waitUntil(caches.open(V).then(function(c){ return c.addAll(ARQ); }));
   self.skipWaiting();
